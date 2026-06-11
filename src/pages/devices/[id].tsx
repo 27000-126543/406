@@ -128,6 +128,7 @@ export default function DeviceDetail() {
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
   const [calibrationRecords, setCalibrationRecords] = useState<CalibrationRecord[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  const [activeRecordTab, setActiveRecordTab] = useState('repair');
 
   useEffect(() => {
     if (id) {
@@ -735,16 +736,10 @@ export default function DeviceDetail() {
         </Col>
       </Row>
 
-      <Card
-        tabList={[
-          { key: 'repair', label: '维修记录' },
-          { key: 'maintenance', label: '保养记录' },
-          { key: 'calibration', label: '校准记录' },
-          { key: 'workorder', label: '工单历史' },
-        ]}
-      >
+      <Card title="相关记录">
         <Tabs
-          activeKey="repair"
+          activeKey={activeRecordTab}
+          onChange={setActiveRecordTab}
           items={[
             {
               key: 'repair',

@@ -16,6 +16,7 @@ const defaultMockUsers: User[] = [
   {
     id: 'u001',
     username: 'director001',
+    password: '123456',
     name: '张明华',
     role: 'director',
     department: '设备科',
@@ -28,6 +29,7 @@ const defaultMockUsers: User[] = [
   {
     id: 'u002',
     username: 'engineer',
+    password: '123456',
     name: '李工程师',
     role: 'engineer',
     department: '设备科',
@@ -40,6 +42,7 @@ const defaultMockUsers: User[] = [
   {
     id: 'u003',
     username: 'nurse',
+    password: '123456',
     name: '王护士长',
     role: 'nurse',
     department: '心内科',
@@ -52,6 +55,7 @@ const defaultMockUsers: User[] = [
   {
     id: 'u004',
     username: 'finance',
+    password: '123456',
     name: '赵会计',
     role: 'finance',
     department: '财务科',
@@ -64,6 +68,7 @@ const defaultMockUsers: User[] = [
   {
     id: 'u005',
     username: 'admin',
+    password: '123456',
     name: '系统管理员',
     role: 'admin',
     department: '信息科',

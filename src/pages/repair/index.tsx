@@ -117,6 +117,7 @@ export default function RepairWorkbench() {
   const pendingOrders = workOrders.filter(
     (w) => w.status === 'assigned' || w.status === 'pending'
   );
+  const acceptedOrders = workOrders.filter((w) => w.status === 'accepted');
   const inProgressOrders = workOrders.filter((w) => w.status === 'in_progress');
   const completedOrders = workOrders.filter((w) => w.status === 'completed');
 
@@ -150,7 +151,6 @@ export default function RepairWorkbench() {
     if (success) {
       setTimerRunning(true);
       setRepairTimer(0);
-      setRepairModalVisible(true);
       message.success('开始维修');
     }
   };
@@ -327,6 +327,81 @@ export default function RepairWorkbench() {
           >
             一键接单
           </Button>
+        </div>
+      </Card>
+    );
+  };
+
+  const renderAcceptedCard = (workOrder: WorkOrder) => {
+    const device = devices.find((d) => d.id === workOrder.deviceId);
+
+    return (
+      <Card
+        key={workOrder.id}
+        className="mb-4 hover:shadow-lg transition-shadow cursor-pointer"
+        onClick={() => navigate(`/repair/${workOrder.id}`)}
+      >
+        <div className="flex justify-between items-start mb-3">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-medium text-lg">{workOrder.deviceName}</span>
+              <Tag color={priorityColors[workOrder.priority]}>
+                {priorityLabels[workOrder.priority]}优先级
+              </Tag>
+              <Tag color="cyan">已接单</Tag>
+            </div>
+            <div className="text-text-secondary text-sm mb-2">
+              {workOrder.title}
+            </div>
+          </div>
+        </div>
+
+        <Descriptions column={2} size="small" className="mb-3">
+          <Descriptions.Item label="故障描述">{workOrder.description}</Descriptions.Item>
+          <Descriptions.Item label="位置">{workOrder.location}</Descriptions.Item>
+          <Descriptions.Item label="科室">{workOrder.department}</Descriptions.Item>
+          <Descriptions.Item label="报修人">{workOrder.reporterName}</Descriptions.Item>
+          <Descriptions.Item label="设备型号">{device?.model || '-'}</Descriptions.Item>
+          <Descriptions.Item label="设备编号">{device?.serialNumber || '-'}</Descriptions.Item>
+        </Descriptions>
+
+        <div className="flex justify-between items-center">
+          <Space>
+            <Tag color="blue">{workOrder.type === 'repair' ? '维修' : workOrder.type === 'maintenance' ? '保养' : workOrder.type === 'calibration' ? '校准' : '巡检'}</Tag>
+            <span className="text-text-tertiary text-sm">
+              接单时间：{dayjs(workOrder.updatedAt).format('YYYY-MM-DD HH:mm')}
+            </span>
+          </Space>
+          <Space>
+            <Button
+              icon={<ScanOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleScanConfirm();
+              }}
+            >
+              扫码确认
+            </Button>
+            <Button
+              icon={<InboxOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenPartsSelector();
+              }}
+            >
+              选择配件
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStartRepair(workOrder);
+              }}
+            >
+              开始维修
+            </Button>
+          </Space>
         </div>
       </Card>
     );
@@ -582,6 +657,24 @@ export default function RepairWorkbench() {
             <Empty description="暂无待接工单" />
           ) : (
             pendingOrders.map(renderPendingCard)
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'accepted',
+      label: (
+        <span>
+          <CheckCircleOutlined /> 已接工单
+          <Badge count={acceptedOrders.length} className="ml-2" />
+        </span>
+      ),
+      children: (
+        <div>
+          {acceptedOrders.length === 0 ? (
+            <Empty description="暂无已接工单" />
+          ) : (
+            acceptedOrders.map(renderAcceptedCard)
           )}
         </div>
       ),

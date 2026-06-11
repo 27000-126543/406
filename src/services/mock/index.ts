@@ -57,7 +57,7 @@ export const userService = {
       (u) => u.username === username && u.status === 'active'
     );
     if (!user) return null;
-    if (password !== '123456') return null;
+    if (password !== (user.password || '123456')) return null;
     if (expectedRole && user.role !== expectedRole) return null;
     return user;
   },

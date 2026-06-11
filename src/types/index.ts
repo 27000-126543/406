@@ -3,6 +3,7 @@ export type UserRole = 'director' | 'engineer' | 'nurse' | 'finance' | 'admin';
 export interface User {
   id: string;
   username: string;
+  password?: string;
   name: string;
   role: UserRole;
   department: string;

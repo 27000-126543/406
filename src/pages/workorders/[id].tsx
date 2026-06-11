@@ -76,6 +76,15 @@ const workOrderTypeColor: Record<string, string> = {
   inspection: 'cyan',
 };
 
+const faultCodeMap: Record<string, string> = {
+  F001: 'F001-机械故障',
+  F002: 'F002-电路故障',
+  F003: 'F003-软件异常',
+  F004: 'F004-显示异常',
+  F005: 'F005-报警异常',
+  F999: 'F999-其他',
+};
+
 export default function WorkOrderDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -159,6 +168,7 @@ export default function WorkOrderDetail() {
     const statusSteps: Record<string, number> = {
       pending: 0,
       assigned: 1,
+      accepted: 2,
       in_progress: 3,
       completed: 4,
       cancelled: 4,
@@ -184,7 +194,7 @@ export default function WorkOrderDetail() {
   const canStart = () => {
     if (!workOrder || !user) return false;
     return (
-      (workOrder.status === 'assigned' || workOrder.status === 'in_progress') &&
+      (workOrder.status === 'assigned' || workOrder.status === 'accepted') &&
       workOrder.assigneeId === user.id
     );
   };
@@ -199,7 +209,7 @@ export default function WorkOrderDetail() {
   const canTransfer = () => {
     if (!workOrder || !user) return false;
     return (
-      (workOrder.status === 'assigned' || workOrder.status === 'in_progress') &&
+      (workOrder.status === 'assigned' || workOrder.status === 'accepted' || workOrder.status === 'in_progress') &&
       workOrder.assigneeId === user.id
     );
   };
@@ -209,6 +219,7 @@ export default function WorkOrderDetail() {
     const success = await acceptWorkOrder(workOrder.id);
     if (success) {
       message.success('接单成功');
+      fetchWorkOrderById(workOrder.id);
     } else {
       message.error('接单失败，请重试');
     }
@@ -219,6 +230,7 @@ export default function WorkOrderDetail() {
     const success = await startRepair(workOrder.id);
     if (success) {
       message.success('已开始维修');
+      fetchWorkOrderById(workOrder.id);
     } else {
       message.error('操作失败，请重试');
     }
@@ -244,6 +256,7 @@ export default function WorkOrderDetail() {
       if (record) {
         message.success('维修完成，维修单已生成');
         setCompleteModalVisible(false);
+        fetchWorkOrderById(workOrder.id);
         loadRepairRecord();
       } else {
         const { error } = useWorkOrderStore.getState();
@@ -269,6 +282,7 @@ export default function WorkOrderDetail() {
       if (success) {
         message.success('转派成功');
         setTransferModalVisible(false);
+        fetchWorkOrderById(workOrder.id);
       } else {
         message.error('转派失败，请重试');
       }
@@ -447,7 +461,9 @@ export default function WorkOrderDetail() {
                 </a>
               </Descriptions.Item>
               <Descriptions.Item label="故障代码">
-                {workOrder.id.toUpperCase()}
+                {workOrder.faultCode
+                  ? faultCodeMap[workOrder.faultCode] || workOrder.faultCode
+                  : '-'}
               </Descriptions.Item>
               <Descriptions.Item label="故障描述">
                 <Paragraph>{workOrder.description}</Paragraph>

@@ -150,13 +150,13 @@ export default function UserManagement() {
 
   const handlePasswordOk = async () => {
     try {
-      await passwordForm.validateFields();
+      const values = await passwordForm.validateFields();
       if (resettingUser) {
         const updated = await userService.update(resettingUser.id, {
-          lastLogin: new Date().toISOString(),
+          password: values.password,
         });
         if (updated) {
-          message.success('密码重置成功，新密码为：123456');
+          message.success('密码重置成功');
           setPasswordModalVisible(false);
           setResettingUser(null);
         } else {
