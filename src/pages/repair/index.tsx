@@ -23,6 +23,7 @@ import {
   Statistic,
   Divider,
   Empty,
+  Image,
 } from 'antd';
 import {
   ToolOutlined,
@@ -37,12 +38,16 @@ import {
   InboxOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
+import { Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { useWorkOrderStore } from '@/store/useWorkOrderStore';
 import { useDeviceStore } from '@/store/useDeviceStore';
-import type { WorkOrder, Inventory, WorkOrderPart, RepairRecord } from '@/types';
+import { useAuthStore } from '@/store/useAuthStore';
+import { repairRecordService } from '@/services/mock';
+import type { WorkOrder, Inventory, WorkOrderPart, RepairRecord, RepairPart } from '@/types';
 
+const { Title } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 const { Dragger } = Upload;
@@ -94,6 +99,8 @@ export default function RepairWorkbench() {
   const [afterImageList, setAfterImageList] = useState<UploadProps['fileList']>([]);
   const [perOrderStates, setPerOrderStates] = useState<Map<string, PerOrderState>>(new Map());
   const [activeWorkOrderId, setActiveWorkOrderId] = useState<string | null>(null);
+  const [recordDetailVisible, setRecordDetailVisible] = useState(false);
+  const [selectedRepairRecord, setSelectedRepairRecord] = useState<RepairRecord | null>(null);
 
   const {
     workOrders,
@@ -102,10 +109,12 @@ export default function RepairWorkbench() {
     fetchWorkOrders,
     fetchPartInventory,
     acceptWorkOrder,
+    assignWorkOrder,
     startRepair,
     completeWorkOrder,
     checkPartsStock,
   } = useWorkOrderStore();
+  const user = useAuthStore.getState().user;
 
   const { devices } = useDeviceStore();
 
@@ -205,9 +214,35 @@ export default function RepairWorkbench() {
   };
 
   const handleAcceptOrder = async (workOrderId: string) => {
+    const workOrder = workOrders.find((w) => w.id === workOrderId);
+    if (!workOrder) {
+      message.error('工单不存在');
+      return;
+    }
+    
+    if (!user) {
+      message.error('用户未登录');
+      return;
+    }
+    
+    if (workOrder.status === 'pending' || !workOrder.assigneeId) {
+      const assigned = await assignWorkOrder(workOrderId, user.id, {
+        assigneeName: user.name,
+        isLocked: true,
+      } as any);
+      if (!assigned) {
+        message.error('工单指派失败，请重试');
+        return;
+      }
+    }
+    
     const success = await acceptWorkOrder(workOrderId);
     if (success) {
       message.success('接单成功');
+      fetchWorkOrders();
+    } else {
+      const { error } = useWorkOrderStore.getState();
+      message.error(error || '接单失败，请重试');
     }
   };
 
@@ -345,6 +380,20 @@ export default function RepairWorkbench() {
     }
   };
 
+  const handleViewRepairRecord = async (workOrderId: string) => {
+    try {
+      const records = await repairRecordService.getByWorkOrderId(workOrderId);
+      if (records && records.length > 0) {
+        setSelectedRepairRecord(records[0]);
+        setRecordDetailVisible(true);
+      } else {
+        message.info('暂无维修记录');
+      }
+    } catch {
+      message.error('加载维修记录失败');
+    }
+  };
+
   const beforeUploadProps: UploadProps = {
     fileList: beforeImageList,
     onChange: ({ fileList }) => setBeforeImageList(fileList),
@@ -367,7 +416,7 @@ export default function RepairWorkbench() {
       <Card
         key={workOrder.id}
         className="mb-4 hover:shadow-lg transition-shadow cursor-pointer"
-        onClick={() => navigate(`/repair/${workOrder.id}`)}
+        onClick={() => navigate(`/workorders/${workOrder.id}`)}
       >
         <div className="flex justify-between items-start mb-3">
           <div>
@@ -376,6 +425,7 @@ export default function RepairWorkbench() {
               <Tag color={priorityColors[workOrder.priority]}>
                 {priorityLabels[workOrder.priority]}优先级
               </Tag>
+              {!workOrder.assigneeId && <Tag color="orange">待分配</Tag>}
             </div>
             <div className="text-text-secondary text-sm mb-2">
               {workOrder.title}
@@ -426,7 +476,7 @@ export default function RepairWorkbench() {
       <Card
         key={workOrder.id}
         className="mb-4 hover:shadow-lg transition-shadow cursor-pointer"
-        onClick={() => navigate(`/repair/${workOrder.id}`)}
+        onClick={() => navigate(`/workorders/${workOrder.id}`)}
       >
         <div className="flex justify-between items-start mb-3">
           <div>
@@ -504,7 +554,7 @@ export default function RepairWorkbench() {
       <Card
         key={workOrder.id}
         className="mb-4 hover:shadow-lg transition-shadow"
-        onClick={() => navigate(`/repair/${workOrder.id}`)}
+        onClick={() => navigate(`/workorders/${workOrder.id}`)}
       >
         <div className="flex justify-between items-start mb-3">
           <div>
@@ -613,9 +663,26 @@ export default function RepairWorkbench() {
       title: '操作',
       key: 'action',
       render: (_: unknown, record: WorkOrder) => (
-        <Button type="link" onClick={() => navigate(`/repair/${record.id}`)}>
-          查看详情
-        </Button>
+        <Space>
+          <Button
+            type="link"
+            onClick={() => handleViewRepairRecord(record.id)}
+          >
+            维修记录
+          </Button>
+          <Button
+            type="link"
+            onClick={() => navigate(`/workorders/${record.id}`)}
+          >
+            工单详情
+          </Button>
+          <Button
+            type="link"
+            onClick={() => navigate(`/devices/${record.deviceId}`)}
+          >
+            设备详情
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -1032,6 +1099,130 @@ export default function RepairWorkbench() {
             </Dragger>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="维修记录详情"
+        open={recordDetailVisible}
+        width={800}
+        footer={null}
+        onCancel={() => {
+          setRecordDetailVisible(false);
+          setSelectedRepairRecord(null);
+        }}
+      >
+        {selectedRepairRecord && (
+          <div className="space-y-4">
+            <Alert
+              message="维修完成"
+              description={`工程师 ${selectedRepairRecord.technicianName} 于 ${dayjs(selectedRepairRecord.endTime).format('YYYY-MM-DD HH:mm')} 完成维修`}
+              type="success"
+              showIcon
+              className="mb-4"
+            />
+
+            <Descriptions column={2} bordered size="small">
+              <Descriptions.Item label="设备名称">
+                {selectedRepairRecord.deviceName}
+              </Descriptions.Item>
+              <Descriptions.Item label="工单号">
+                {selectedRepairRecord.workOrderId}
+              </Descriptions.Item>
+              <Descriptions.Item label="故障描述">
+                {selectedRepairRecord.faultDescription}
+              </Descriptions.Item>
+              <Descriptions.Item label="故障原因">
+                {selectedRepairRecord.diagnosis}
+              </Descriptions.Item>
+              <Descriptions.Item label="解决方案" span={2}>
+                {selectedRepairRecord.solution}
+              </Descriptions.Item>
+              <Descriptions.Item label="维修时长">
+                {selectedRepairRecord.actualDuration || 
+                  Math.round((dayjs(selectedRepairRecord.endTime).valueOf() - 
+                    dayjs(selectedRepairRecord.startTime).valueOf()) / 60000)} 分钟
+              </Descriptions.Item>
+              <Descriptions.Item label="总费用">
+                <span className="text-red-500 font-semibold">
+                  ¥{selectedRepairRecord.totalCost.toLocaleString()}
+                </span>
+              </Descriptions.Item>
+            </Descriptions>
+
+            {selectedRepairRecord.partsUsed.length > 0 && (
+              <div>
+                <Title level={5} style={{ marginTop: 0 }}>更换配件</Title>
+                <Table
+                  size="small"
+                  columns={[
+                    { title: '配件名称', dataIndex: 'name', key: 'name' },
+                    { title: '型号', dataIndex: 'model', key: 'model' },
+                    { title: '数量', dataIndex: 'quantity', key: 'quantity' },
+                    { title: '单价', dataIndex: 'unitPrice', key: 'unitPrice', 
+                      render: (v: number) => `¥${v.toLocaleString()}` },
+                    { title: '小计', key: 'total', 
+                      render: (_: any, r: RepairPart) => 
+                        `¥${(r.unitPrice * r.quantity).toLocaleString()}` },
+                  ]}
+                  dataSource={selectedRepairRecord.partsUsed}
+                  rowKey="id"
+                  pagination={false}
+                />
+              </div>
+            )}
+
+            {(selectedRepairRecord.beforePhotos?.length || 
+               selectedRepairRecord.afterPhotos?.length) ? (
+              <Row gutter={16}>
+                {selectedRepairRecord.beforePhotos && 
+                 selectedRepairRecord.beforePhotos.length > 0 && (
+                  <Col span={12}>
+                    <div className="text-center mb-2 font-medium">维修前照片</div>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      <Image.PreviewGroup>
+                        {selectedRepairRecord.beforePhotos.map((p, i) => (
+                          <Image
+                            key={i}
+                            width={120}
+                            height={120}
+                            src={p}
+                            className="rounded object-cover border-2 border-gray-200"
+                          />
+                        ))}
+                      </Image.PreviewGroup>
+                    </div>
+                  </Col>
+                )}
+                {selectedRepairRecord.afterPhotos && 
+                 selectedRepairRecord.afterPhotos.length > 0 && (
+                  <Col span={12}>
+                    <div className="text-center mb-2 font-medium">维修后照片</div>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      <Image.PreviewGroup>
+                        {selectedRepairRecord.afterPhotos.map((p, i) => (
+                          <Image
+                            key={i}
+                            width={120}
+                            height={120}
+                            src={p}
+                            className="rounded object-cover border-2 border-green-200"
+                          />
+                        ))}
+                      </Image.PreviewGroup>
+                    </div>
+                  </Col>
+                )}
+              </Row>
+            ) : null}
+
+            {selectedRepairRecord.remarks && (
+              <div>
+                <Title level={5}>备注</Title>
+                <p>{selectedRepairRecord.remarks}</p>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

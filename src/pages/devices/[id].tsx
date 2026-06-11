@@ -20,6 +20,7 @@ import {
   Spin,
   Empty,
   Upload,
+  Image,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -369,6 +370,44 @@ export default function DeviceDetail() {
         <Text strong type="danger">¥{cost.toLocaleString()}</Text>
       ),
       sorter: (a: RepairRecord, b: RepairRecord) => a.totalCost - b.totalCost,
+    },
+    {
+      title: '维修照片',
+      key: 'photos',
+      render: (_: any, r: RepairRecord) => {
+        const hasPhotos = (r.beforePhotos?.length || 0) + (r.afterPhotos?.length || 0) > 0;
+        if (!hasPhotos) return '-';
+        return (
+          <Space>
+            {r.beforePhotos && r.beforePhotos.length > 0 && (
+              <Image.PreviewGroup>
+                {r.beforePhotos.slice(0, 2).map((p, i) => (
+                  <Image
+                    key={`before-${i}`}
+                    width={40}
+                    height={40}
+                    src={p}
+                    className="rounded object-cover border border-gray-200"
+                  />
+                ))}
+              </Image.PreviewGroup>
+            )}
+            {r.afterPhotos && r.afterPhotos.length > 0 && (
+              <Image.PreviewGroup>
+                {r.afterPhotos.slice(0, 2).map((p, i) => (
+                  <Image
+                    key={`after-${i}`}
+                    width={40}
+                    height={40}
+                    src={p}
+                    className="rounded object-cover border border-green-200"
+                  />
+                ))}
+              </Image.PreviewGroup>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: '状态',

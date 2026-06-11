@@ -578,6 +578,8 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
         for (const part of data.parts) {
           await inventoryService.adjustStock(part.partId, -part.quantity);
         }
+
+        await get().fetchPartInventory();
       }
 
       const updatedWorkOrder = await workOrderService.complete(

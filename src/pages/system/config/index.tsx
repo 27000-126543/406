@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Card,
   Table,
@@ -27,6 +27,8 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { TabsProps } from 'antd';
+import { inventoryService } from '@/services/mock';
+import type { Inventory } from '@/types';
 
 const { Title } = Typography;
 
@@ -47,18 +49,6 @@ interface FaultCode {
   severity: 'low' | 'medium' | 'high' | 'urgent';
   description?: string;
   solution?: string;
-}
-
-interface PartItem {
-  id: string;
-  name: string;
-  model: string;
-  category: string;
-  unit: string;
-  unitPrice: number;
-  stock: number;
-  minStock: number;
-  status: 'normal' | 'low_stock' | 'out_of_stock';
 }
 
 interface InspectionCycle {
@@ -86,15 +76,6 @@ const mockFaultCodes: FaultCode[] = [
   { id: '3', code: 'E-003', name: '通信故障', type: '系统故障', severity: 'medium', description: '设备与系统通信中断', solution: '检查网络连接，重启设备' },
   { id: '4', code: 'E-004', name: '温度过高', type: '环境故障', severity: 'urgent', description: '设备内部温度超出正常范围', solution: '检查散热系统，清理灰尘' },
   { id: '5', code: 'E-005', name: '校准过期', type: '维护提醒', severity: 'low', description: '设备校准已过期', solution: '安排校准计划' },
-];
-
-const mockParts: PartItem[] = [
-  { id: '1', name: 'X光球管', model: 'XRT-2000', category: '影像配件', unit: '个', unitPrice: 25000, stock: 2, minStock: 1, status: 'normal' },
-  { id: '2', name: 'CT探测器', model: 'CTD-128', category: '影像配件', unit: '个', unitPrice: 120000, stock: 1, minStock: 1, status: 'normal' },
-  { id: '3', name: '流量传感器', model: 'FS-100', category: '传感器', unit: '个', unitPrice: 800, stock: 5, minStock: 3, status: 'normal' },
-  { id: '4', name: '氧电池', model: 'O2-500', category: '传感器', unit: '个', unitPrice: 1200, stock: 3, minStock: 2, status: 'normal' },
-  { id: '5', name: '过滤棉（呼吸机）', model: 'FM-V', category: '消耗品', unit: '包', unitPrice: 50, stock: 20, minStock: 10, status: 'normal' },
-  { id: '6', name: '生化仪探针', model: 'BP-200', category: '检验配件', unit: '个', unitPrice: 3500, stock: 0, minStock: 2, status: 'out_of_stock' },
 ];
 
 const mockInspectionCycles: InspectionCycle[] = [
@@ -143,15 +124,34 @@ export default function SystemConfig() {
   const [activeTab, setActiveTab] = useState('device-type');
   const [deviceTypes, setDeviceTypes] = useState<DeviceType[]>(mockDeviceTypes);
   const [faultCodes, setFaultCodes] = useState<FaultCode[]>(mockFaultCodes);
-  const [parts, setParts] = useState<PartItem[]>(mockParts);
+  const [parts, setParts] = useState<Inventory[]>([]);
   const [inspectionCycles, setInspectionCycles] = useState<InspectionCycle[]>(mockInspectionCycles);
 
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingItem, setEditingItem] = useState<DeviceType | FaultCode | PartItem | InspectionCycle | null>(null);
+  const [editingItem, setEditingItem] = useState<DeviceType | FaultCode | Inventory | InspectionCycle | null>(null);
   const [modalTitle, setModalTitle] = useState('');
   const [form] = Form.useForm();
 
   const [keyword, setKeyword] = useState('');
+  const [partsLoading, setPartsLoading] = useState(false);
+
+  const loadParts = async () => {
+    setPartsLoading(true);
+    try {
+      const data = await inventoryService.getAll();
+      setParts(data);
+    } catch {
+      message.error('加载配件库失败');
+    } finally {
+      setPartsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'parts') {
+      loadParts();
+    }
+  }, [activeTab]);
 
   const tabItems: TabsProps['items'] = [
     {
@@ -243,7 +243,7 @@ export default function SystemConfig() {
     setModalVisible(true);
   };
 
-  const handleEdit = (item: DeviceType | FaultCode | PartItem | InspectionCycle) => {
+  const handleEdit = (item: DeviceType | FaultCode | Inventory | InspectionCycle) => {
     setEditingItem(item);
     form.setFieldsValue(item);
     setModalTitle(
@@ -258,17 +258,23 @@ export default function SystemConfig() {
     setModalVisible(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (activeTab === 'device-type') {
       setDeviceTypes(deviceTypes.filter((item) => item.id !== id));
+      message.success('删除成功');
     } else if (activeTab === 'fault-code') {
       setFaultCodes(faultCodes.filter((item) => item.id !== id));
+      message.success('删除成功');
     } else if (activeTab === 'parts') {
-      setParts(parts.filter((item) => item.id !== id));
+      const success = await inventoryService.delete(id);
+      if (success) {
+        message.success('配件删除成功');
+        loadParts();
+      }
     } else if (activeTab === 'inspection-cycle') {
       setInspectionCycles(inspectionCycles.filter((item) => item.id !== id));
+      message.success('删除成功');
     }
-    message.success('删除成功');
   };
 
   const handleModalOk = async () => {
@@ -281,34 +287,46 @@ export default function SystemConfig() {
               item.id === editingItem.id ? { ...item, ...values } : item
             )
           );
+          message.success('更新成功');
         } else if (activeTab === 'fault-code') {
           setFaultCodes(
             faultCodes.map((item) =>
               item.id === editingItem.id ? { ...item, ...values } : item
             )
           );
+          message.success('更新成功');
         } else if (activeTab === 'parts') {
-          const newStatus =
-            values.stock === 0
+          const updated = await inventoryService.update(editingItem.id, {
+            name: values.name,
+            model: values.model,
+            category: values.category,
+            manufacturer: values.manufacturer,
+            unit: values.unit,
+            quantity: values.quantity,
+            minStock: values.minStock,
+            maxStock: values.maxStock,
+            unitPrice: values.unitPrice,
+            location: values.location,
+            status: values.quantity === 0
               ? 'out_of_stock'
-              : values.stock < values.minStock
-              ? 'low_stock'
-              : 'normal';
-          setParts(
-            parts.map((item) =>
-              item.id === editingItem.id
-                ? { ...item, ...values, status: newStatus }
-                : item
-            )
-          );
+              : values.quantity < values.minStock
+                ? 'low_stock'
+                : 'normal',
+          });
+          if (updated) {
+            message.success('配件更新成功');
+            setModalVisible(false);
+            loadParts();
+            return;
+          }
         } else if (activeTab === 'inspection-cycle') {
           setInspectionCycles(
             inspectionCycles.map((item) =>
               item.id === editingItem.id ? { ...item, ...values } : item
             )
           );
+          message.success('更新成功');
         }
-        message.success('更新成功');
       } else {
         const newItem = {
           ...values,
@@ -316,20 +334,38 @@ export default function SystemConfig() {
         };
         if (activeTab === 'device-type') {
           setDeviceTypes([...deviceTypes, { ...newItem, status: 'active' }]);
+          message.success('新增成功');
         } else if (activeTab === 'fault-code') {
           setFaultCodes([...faultCodes, newItem]);
+          message.success('新增成功');
         } else if (activeTab === 'parts') {
-          const status =
-            values.stock === 0
+          const newPart = await inventoryService.create({
+            name: values.name,
+            model: values.model,
+            category: values.category,
+            manufacturer: values.manufacturer || '',
+            unit: values.unit,
+            quantity: values.quantity,
+            minStock: values.minStock,
+            maxStock: values.maxStock || values.minStock * 2,
+            unitPrice: values.unitPrice,
+            location: values.location || '',
+            status: values.quantity === 0
               ? 'out_of_stock'
-              : values.stock < values.minStock
-              ? 'low_stock'
-              : 'normal';
-          setParts([...parts, { ...newItem, status }]);
+              : values.quantity < values.minStock
+                ? 'low_stock'
+                : 'normal',
+          });
+          if (newPart) {
+            message.success('配件添加成功');
+            setModalVisible(false);
+            loadParts();
+            return;
+          }
         } else if (activeTab === 'inspection-cycle') {
           setInspectionCycles([...inspectionCycles, { ...newItem, status: 'active' }]);
+          message.success('新增成功');
         }
-        message.success('新增成功');
       }
       setModalVisible(false);
     } catch {
@@ -465,7 +501,7 @@ export default function SystemConfig() {
     },
   ];
 
-  const partsColumns: ColumnsType<PartItem> = [
+  const partsColumns: ColumnsType<Inventory> = [
     {
       title: '配件名称',
       dataIndex: 'name',
@@ -499,9 +535,14 @@ export default function SystemConfig() {
     },
     {
       title: '库存数量',
-      dataIndex: 'stock',
-      key: 'stock',
+      dataIndex: 'quantity',
+      key: 'quantity',
       width: 100,
+      render: (q: number, record: Inventory) => (
+        <span className={q < record.minStock ? 'text-error' : ''}>
+          {q} {record.unit}
+        </span>
+      ),
     },
     {
       title: '最低库存',
@@ -725,6 +766,12 @@ export default function SystemConfig() {
             />
           </Form.Item>
           <Form.Item
+            name="manufacturer"
+            label="制造商"
+          >
+            <Input placeholder="请输入制造商" />
+          </Form.Item>
+          <Form.Item
             name="unit"
             label="单位"
             rules={[{ required: true, message: '请输入单位' }]}
@@ -739,7 +786,7 @@ export default function SystemConfig() {
             <InputNumber style={{ width: '100%' }} min={0} prefix="¥" />
           </Form.Item>
           <Form.Item
-            name="stock"
+            name="quantity"
             label="库存数量"
             rules={[{ required: true, message: '请输入库存数量' }]}
           >
@@ -751,6 +798,18 @@ export default function SystemConfig() {
             rules={[{ required: true, message: '请输入最低库存' }]}
           >
             <InputNumber style={{ width: '100%' }} min={0} />
+          </Form.Item>
+          <Form.Item
+            name="maxStock"
+            label="最大库存"
+          >
+            <InputNumber style={{ width: '100%' }} min={0} />
+          </Form.Item>
+          <Form.Item
+            name="location"
+            label="存放位置"
+          >
+            <Input placeholder="请输入存放位置" />
           </Form.Item>
         </>
       );
@@ -865,10 +924,11 @@ export default function SystemConfig() {
           />
         )}
         {activeTab === 'parts' && (
-          <Table<PartItem>
+          <Table<Inventory>
             columns={partsColumns}
             dataSource={filteredParts}
             rowKey="id"
+            loading={partsLoading}
             pagination={{
               pageSize: 10,
               showSizeChanger: true,
