@@ -69,6 +69,14 @@ interface RepairFormData {
   afterImages: string[];
 }
 
+interface PerOrderState {
+  timer: number;
+  timerRunning: boolean;
+  parts: WorkOrderPart[];
+  beforeImages: UploadProps['fileList'];
+  afterImages: UploadProps['fileList'];
+}
+
 export default function RepairWorkbench() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('pending');
@@ -84,6 +92,8 @@ export default function RepairWorkbench() {
   const [stockWarning, setStockWarning] = useState<string | null>(null);
   const [beforeImageList, setBeforeImageList] = useState<UploadProps['fileList']>([]);
   const [afterImageList, setAfterImageList] = useState<UploadProps['fileList']>([]);
+  const [perOrderStates, setPerOrderStates] = useState<Map<string, PerOrderState>>(new Map());
+  const [activeWorkOrderId, setActiveWorkOrderId] = useState<string | null>(null);
 
   const {
     workOrders,
@@ -138,6 +148,62 @@ export default function RepairWorkbench() {
     return { text: `${remaining}分钟`, color: 'blue' };
   };
 
+  const switchActiveWorkOrder = (workOrder: WorkOrder | null) => {
+    if (activeWorkOrderId) {
+      setPerOrderStates((prev) => {
+        const next = new Map(prev);
+        next.set(activeWorkOrderId, {
+          timer: repairTimer,
+          timerRunning,
+          parts: selectedParts,
+          beforeImages: beforeImageList,
+          afterImages: afterImageList,
+        });
+        return next;
+      });
+      setTimerRunning(false);
+    }
+
+    if (workOrder) {
+      const saved = perOrderStates.get(workOrder.id);
+      setSelectedWorkOrder(workOrder);
+      setActiveWorkOrderId(workOrder.id);
+      if (saved) {
+        setRepairTimer(saved.timer);
+        setTimerRunning(saved.timerRunning);
+        setSelectedParts(saved.parts);
+        setBeforeImageList(saved.beforeImages);
+        setAfterImageList(saved.afterImages);
+      } else {
+        if (workOrder.status === 'in_progress' && workOrder.startedAt) {
+          const elapsed = Math.floor((Date.now() - new Date(workOrder.startedAt).getTime()) / 1000);
+          setRepairTimer(elapsed);
+        } else {
+          setRepairTimer(0);
+        }
+        setTimerRunning(false);
+        setSelectedParts([]);
+        setBeforeImageList(
+          (workOrder.faultPhotos || []).map((url, i) => ({
+            uid: `-${i}`,
+            name: `fault_${i}.jpg`,
+            status: 'done',
+            url,
+          }))
+        );
+        setAfterImageList([]);
+      }
+    } else {
+      setSelectedWorkOrder(null);
+      setActiveWorkOrderId(null);
+      setRepairTimer(0);
+      setTimerRunning(false);
+      setSelectedParts([]);
+      setBeforeImageList([]);
+      setAfterImageList([]);
+    }
+  };
+
   const handleAcceptOrder = async (workOrderId: string) => {
     const success = await acceptWorkOrder(workOrderId);
     if (success) {
@@ -146,12 +212,24 @@ export default function RepairWorkbench() {
   };
 
   const handleStartRepair = async (workOrder: WorkOrder) => {
-    setSelectedWorkOrder(workOrder);
-    const success = await startRepair(workOrder.id);
-    if (success) {
+    if (activeWorkOrderId !== workOrder.id) {
+      switchActiveWorkOrder(workOrder);
+    }
+
+    if (workOrder.status !== 'in_progress') {
+      const success = await startRepair(workOrder.id);
+      if (success) {
+        message.success('开始维修');
+        fetchWorkOrders();
+        setTimerRunning(true);
+        setRepairModalVisible(true);
+      } else {
+        const { error } = useWorkOrderStore.getState();
+        message.error(error || '开始维修失败');
+      }
+    } else {
       setTimerRunning(true);
-      setRepairTimer(0);
-      message.success('开始维修');
+      setRepairModalVisible(true);
     }
   };
 
@@ -163,7 +241,10 @@ export default function RepairWorkbench() {
     setTimerRunning(true);
   };
 
-  const handleScanConfirm = () => {
+  const handleScanConfirm = (workOrder?: WorkOrder) => {
+    if (workOrder && activeWorkOrderId !== workOrder.id) {
+      switchActiveWorkOrder(workOrder);
+    }
     setScanModalVisible(true);
   };
 
@@ -172,7 +253,10 @@ export default function RepairWorkbench() {
     message.success('扫码确认成功');
   };
 
-  const handleOpenPartsSelector = () => {
+  const handleOpenPartsSelector = (workOrder?: WorkOrder) => {
+    if (workOrder && activeWorkOrderId !== workOrder.id) {
+      switchActiveWorkOrder(workOrder);
+    }
     setPartsModalVisible(true);
   };
 
@@ -223,14 +307,15 @@ export default function RepairWorkbench() {
   const handleSubmitReport = async () => {
     try {
       const values = await repairForm.validateFields();
-      if (!selectedWorkOrder) return;
+      const workOrderId = activeWorkOrderId || selectedWorkOrder?.id;
+      if (!workOrderId) return;
 
       const beforeImages = beforeImageList.map((f) => f.url || f.name || `before_${Date.now()}_${f.uid}`);
       const afterImages = afterImageList.map((f) => f.url || f.name || `after_${Date.now()}_${f.uid}`);
 
       const actualTime = Math.max(1, Math.floor(repairTimer / 60));
 
-      const repairRecord = await completeWorkOrder(selectedWorkOrder.id, {
+      const repairRecord = await completeWorkOrder(workOrderId, {
         actualTime,
         failureAnalysis: values.faultAnalysis,
         solution: values.solution,
@@ -244,11 +329,13 @@ export default function RepairWorkbench() {
         setReportModalVisible(false);
         setRepairModalVisible(false);
         setTimerRunning(false);
-        setSelectedWorkOrder(null);
+        setPerOrderStates((prev) => {
+          const next = new Map(prev);
+          next.delete(workOrderId);
+          return next;
+        });
+        switchActiveWorkOrder(null);
         repairForm.resetFields();
-        setSelectedParts([]);
-        setBeforeImageList([]);
-        setAfterImageList([]);
       } else {
         const { error } = useWorkOrderStore.getState();
         message.error(error || '提交失败，请重试');
@@ -369,7 +456,7 @@ export default function RepairWorkbench() {
           <Space>
             <Tag color="blue">{workOrder.type === 'repair' ? '维修' : workOrder.type === 'maintenance' ? '保养' : workOrder.type === 'calibration' ? '校准' : '巡检'}</Tag>
             <span className="text-text-tertiary text-sm">
-              接单时间：{dayjs(workOrder.updatedAt).format('YYYY-MM-DD HH:mm')}
+              接单时间：{workOrder.acceptedAt ? dayjs(workOrder.acceptedAt).format('YYYY-MM-DD HH:mm') : '-'}
             </span>
           </Space>
           <Space>
@@ -377,7 +464,7 @@ export default function RepairWorkbench() {
               icon={<ScanOutlined />}
               onClick={(e) => {
                 e.stopPropagation();
-                handleScanConfirm();
+                handleScanConfirm(workOrder);
               }}
             >
               扫码确认
@@ -386,7 +473,7 @@ export default function RepairWorkbench() {
               icon={<InboxOutlined />}
               onClick={(e) => {
                 e.stopPropagation();
-                handleOpenPartsSelector();
+                handleOpenPartsSelector(workOrder);
               }}
             >
               选择配件
@@ -449,7 +536,7 @@ export default function RepairWorkbench() {
         <div className="flex justify-between items-center">
           <Space>
             <span className="text-text-tertiary text-sm">
-              开始时间：{dayjs(workOrder.updatedAt).format('YYYY-MM-DD HH:mm')}
+              开始时间：{workOrder.startedAt ? dayjs(workOrder.startedAt).format('YYYY-MM-DD HH:mm') : '-'}
             </span>
           </Space>
           <Space>
@@ -457,7 +544,7 @@ export default function RepairWorkbench() {
               icon={<ScanOutlined />}
               onClick={(e) => {
                 e.stopPropagation();
-                handleScanConfirm();
+                handleScanConfirm(workOrder);
               }}
             >
               扫码确认
@@ -466,7 +553,7 @@ export default function RepairWorkbench() {
               icon={<InboxOutlined />}
               onClick={(e) => {
                 e.stopPropagation();
-                handleOpenPartsSelector();
+                handleOpenPartsSelector(workOrder);
               }}
             >
               选择配件
@@ -479,7 +566,7 @@ export default function RepairWorkbench() {
                 handleStartRepair(workOrder);
               }}
             >
-              开始维修
+              继续维修
             </Button>
           </Space>
         </div>
@@ -781,10 +868,10 @@ export default function RepairWorkbench() {
                       继续计时
                     </Button>
                   )}
-                  <Button icon={<ScanOutlined />} onClick={handleScanConfirm}>
+                  <Button icon={<ScanOutlined />} onClick={() => handleScanConfirm()}>
                     扫码确认到达
                   </Button>
-                  <Button icon={<InboxOutlined />} onClick={handleOpenPartsSelector}>
+                  <Button icon={<InboxOutlined />} onClick={() => handleOpenPartsSelector()}>
                     更换配件 ({selectedParts.length})
                   </Button>
                 </Space>

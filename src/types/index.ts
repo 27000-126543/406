@@ -71,6 +71,7 @@ export interface WorkOrder {
   autoReassignedCount?: number;
   faultCode?: string;
   faultPhotos?: string[];
+  acceptedAt?: string;
   startedAt?: string;
   department: string;
   location: string;

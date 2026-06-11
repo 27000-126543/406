@@ -508,15 +508,13 @@ export default function WorkOrderDetail() {
                 )}
               </Descriptions.Item>
               <Descriptions.Item label="接单时间">
-                {workOrder.status === 'in_progress' ||
-                workOrder.status === 'completed'
-                  ? dayjs(workOrder.updatedAt).format('YYYY-MM-DD HH:mm:ss')
+                {(workOrder.status === 'accepted' || workOrder.status === 'in_progress' || workOrder.status === 'completed') && workOrder.acceptedAt
+                  ? dayjs(workOrder.acceptedAt).format('YYYY-MM-DD HH:mm:ss')
                   : '-'}
               </Descriptions.Item>
               <Descriptions.Item label="开始时间">
-                {workOrder.status === 'in_progress' ||
-                workOrder.status === 'completed'
-                  ? dayjs(workOrder.updatedAt).format('YYYY-MM-DD HH:mm:ss')
+                {(workOrder.status === 'in_progress' || workOrder.status === 'completed') && workOrder.startedAt
+                  ? dayjs(workOrder.startedAt).format('YYYY-MM-DD HH:mm:ss')
                   : '-'}
               </Descriptions.Item>
               <Descriptions.Item label="完成时间">

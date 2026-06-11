@@ -428,7 +428,14 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
     acceptWorkOrder: async (workOrderId) => {
       set({ loading: true, error: null });
       const currentUser = useAuthStore.getState().user;
-      const workOrder = get().workOrders.find((w) => w.id === workOrderId);
+      let workOrder = get().workOrders.find((w) => w.id === workOrderId)
+        || (get().currentWorkOrder?.id === workOrderId ? get().currentWorkOrder : null);
+      
+      if (!workOrder) {
+        try {
+          workOrder = await workOrderService.getById(workOrderId);
+        } catch {}
+      }
 
       if (!workOrder) {
         set({ error: '工单不存在', loading: false });
@@ -453,6 +460,7 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
 
       const updatedWorkOrder = await workOrderService.update(workOrderId, {
         status: 'accepted',
+        acceptedAt: new Date().toISOString(),
       });
 
       if (updatedWorkOrder) {
@@ -487,7 +495,14 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
     startRepair: async (workOrderId) => {
       set({ loading: true, error: null });
       const currentUser = useAuthStore.getState().user;
-      const workOrder = get().workOrders.find((w) => w.id === workOrderId);
+      let workOrder = get().workOrders.find((w) => w.id === workOrderId)
+        || (get().currentWorkOrder?.id === workOrderId ? get().currentWorkOrder : null);
+      
+      if (!workOrder) {
+        try {
+          workOrder = await workOrderService.getById(workOrderId);
+        } catch {}
+      }
 
       if (!workOrder) {
         set({ error: '工单不存在', loading: false });
@@ -531,7 +546,14 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
     completeWorkOrder: async (workOrderId, data) => {
       set({ loading: true, error: null });
       const currentUser = useAuthStore.getState().user;
-      const workOrder = get().workOrders.find((w) => w.id === workOrderId);
+      let workOrder = get().workOrders.find((w) => w.id === workOrderId)
+        || (get().currentWorkOrder?.id === workOrderId ? get().currentWorkOrder : null);
+      
+      if (!workOrder) {
+        try {
+          workOrder = await workOrderService.getById(workOrderId);
+        } catch {}
+      }
 
       if (!workOrder) {
         set({ error: '工单不存在', loading: false });
@@ -670,7 +692,14 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
     transferWorkOrder: async (workOrderId, toEngineerId, reason) => {
       set({ loading: true, error: null });
       const currentUser = useAuthStore.getState().user;
-      const workOrder = get().workOrders.find((w) => w.id === workOrderId);
+      let workOrder = get().workOrders.find((w) => w.id === workOrderId)
+        || (get().currentWorkOrder?.id === workOrderId ? get().currentWorkOrder : null);
+      
+      if (!workOrder) {
+        try {
+          workOrder = await workOrderService.getById(workOrderId);
+        } catch {}
+      }
       const { engineers, fetchEngineers, transferHistory } = get();
 
       if (engineers.length === 0) {
