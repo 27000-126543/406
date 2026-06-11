@@ -59,15 +59,17 @@ const Header: React.FC<HeaderProps> = ({ collapsed, onToggle }) => {
     
     const pathMap: Record<string, string> = {
       dashboard: '仪表盘',
-      device: '设备管理',
-      workorder: '工单管理',
+      devices: '设备管理',
+      workorders: '工单管理',
       repair: '维修工作台',
       maintenance: '保养计划',
       calibration: '计量校准',
       scrap: '报废管理',
-      report: '数据报表',
-      message: '消息中心',
+      reports: '数据报表',
+      messages: '消息中心',
       system: '系统管理',
+      users: '用户管理',
+      config: '基础配置',
     };
 
     let currentPath = '';
@@ -98,7 +100,30 @@ const Header: React.FC<HeaderProps> = ({ collapsed, onToggle }) => {
   };
 
   const handleMessageClick = () => {
-    navigate('/message');
+    navigate('/messages');
+  };
+
+  const handleNotificationItemClick = (msg: any) => {
+    markAsRead(msg.id);
+
+    const routeMap: Record<string, string> = {
+      workorder: msg.relatedId ? `/workorders/${msg.relatedId}` : '/workorders',
+      work_order: msg.relatedId ? `/workorders/${msg.relatedId}` : '/workorders',
+      device: msg.relatedId ? `/devices/${msg.relatedId}` : '/devices',
+      maintenance: '/maintenance',
+      maintenance_plan: '/maintenance',
+      calibration: '/calibration',
+      calibration_record: '/calibration',
+      scrap: '/scrap',
+      inventory: '/system/config',
+    };
+
+    const route = msg.relatedType ? routeMap[msg.relatedType] : null;
+    if (route) {
+      navigate(route);
+    } else {
+      navigate('/messages');
+    }
   };
 
   const userMenuItems: MenuProps['items'] = [
@@ -131,8 +156,7 @@ const Header: React.FC<HeaderProps> = ({ collapsed, onToggle }) => {
       <div
         className="py-2 px-1 cursor-pointer hover:bg-primary-50 rounded transition-colors"
         onClick={() => {
-          markAsRead(msg.id);
-          handleMessageClick();
+          handleNotificationItemClick(msg);
         }}
       >
         <div className={`text-sm ${msg.isRead ? 'text-text-tertiary' : 'text-text-primary font-medium'}`}>

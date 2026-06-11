@@ -176,8 +176,8 @@ export default function WorkOrderList() {
 
   const handleSmartDispatch = async (workOrder: WorkOrder) => {
     const result = await smartDispatch(workOrder.id);
-    if (result) {
-      message.success(`已智能派单给 ${result.name}`);
+    if (result && result.assignee) {
+      message.success(`已智能派单给 ${result.assignee.name}（备选：${result.backup?.name || '无'}）`);
     } else {
       message.error('智能派单失败，请手动派单');
     }

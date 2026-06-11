@@ -64,6 +64,13 @@ export interface WorkOrder {
   reporterName: string;
   assigneeId?: string;
   assigneeName?: string;
+  backupAssigneeId?: string;
+  backupAssigneeName?: string;
+  isLocked?: boolean;
+  autoReassignedCount?: number;
+  faultCode?: string;
+  faultPhotos?: string[];
+  startedAt?: string;
   department: string;
   location: string;
   estimatedTime?: number;
@@ -91,6 +98,9 @@ export interface RepairRecord {
   status: 'completed' | 'pending_approval';
   remarks?: string;
   createdAt: string;
+  beforePhotos?: string[];
+  afterPhotos?: string[];
+  actualDuration?: number;
 }
 
 export interface RepairPart {

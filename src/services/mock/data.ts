@@ -12,7 +12,7 @@ import type {
   InspectionCheckItem,
 } from '../../types';
 
-export const mockUsers: User[] = [
+const defaultMockUsers: User[] = [
   {
     id: 'u001',
     username: 'director001',
@@ -74,6 +74,19 @@ export const mockUsers: User[] = [
     lastLogin: '2024-06-10T07:00:00Z',
   },
 ];
+
+const loadMockUsers = (): User[] => {
+  try {
+    const stored = localStorage.getItem('mock-users-storage');
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch {
+  }
+  return [...defaultMockUsers];
+};
+
+export const mockUsers: User[] = loadMockUsers();
 
 export const mockDevices: Device[] = [
   {
@@ -1589,3 +1602,99 @@ export const mockInspectionPlans: InspectionPlan[] = [
     updatedAt: '2024-05-25T14:30:00Z',
   },
 ];
+
+const STORAGE_KEY = 'mock-data-storage';
+
+export interface MockDataState {
+  users: User[];
+  devices: Device[];
+  workOrders: WorkOrder[];
+  repairRecords: RepairRecord[];
+  inventory: Inventory[];
+  maintenancePlans: MaintenancePlan[];
+  calibrationRecords: CalibrationRecord[];
+  scrapApplications: ScrapApplication[];
+  messages: Message[];
+  inspectionPlans: InspectionPlan[];
+}
+
+export const saveMockDataToStorage = () => {
+  try {
+    const state: MockDataState = {
+      users: mockUsers,
+      devices: mockDevices,
+      workOrders: mockWorkOrders,
+      repairRecords: mockRepairRecords,
+      inventory: mockInventory,
+      maintenancePlans: mockMaintenancePlans,
+      calibrationRecords: mockCalibrationRecords,
+      scrapApplications: mockScrapApplications,
+      messages: mockMessages,
+      inspectionPlans: mockInspectionPlans,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+  }
+};
+
+export const loadMockDataFromStorage = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const state: MockDataState = JSON.parse(stored);
+      if (state.users && state.users.length > 0) {
+        (mockUsers as any).length = 0;
+        (mockUsers as any).push(...state.users);
+      }
+      if (state.devices && state.devices.length > 0) {
+        (mockDevices as any).length = 0;
+        (mockDevices as any).push(...state.devices);
+      }
+      if (state.workOrders && state.workOrders.length > 0) {
+        (mockWorkOrders as any).length = 0;
+        (mockWorkOrders as any).push(...state.workOrders);
+      }
+      if (state.repairRecords && state.repairRecords.length > 0) {
+        (mockRepairRecords as any).length = 0;
+        (mockRepairRecords as any).push(...state.repairRecords);
+      }
+      if (state.inventory && state.inventory.length > 0) {
+        (mockInventory as any).length = 0;
+        (mockInventory as any).push(...state.inventory);
+      }
+      if (state.maintenancePlans && state.maintenancePlans.length > 0) {
+        (mockMaintenancePlans as any).length = 0;
+        (mockMaintenancePlans as any).push(...state.maintenancePlans);
+      }
+      if (state.calibrationRecords && state.calibrationRecords.length > 0) {
+        (mockCalibrationRecords as any).length = 0;
+        (mockCalibrationRecords as any).push(...state.calibrationRecords);
+      }
+      if (state.scrapApplications && state.scrapApplications.length > 0) {
+        (mockScrapApplications as any).length = 0;
+        (mockScrapApplications as any).push(...state.scrapApplications);
+      }
+      if (state.messages && state.messages.length > 0) {
+        (mockMessages as any).length = 0;
+        (mockMessages as any).push(...state.messages);
+      }
+      if (state.inspectionPlans && state.inspectionPlans.length > 0) {
+        (mockInspectionPlans as any).length = 0;
+        (mockInspectionPlans as any).push(...state.inspectionPlans);
+      }
+      return true;
+    }
+  } catch {
+  }
+  return false;
+};
+
+export const resetMockDataStorage = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem('mock-users-storage');
+  } catch {
+  }
+};
+
+loadMockDataFromStorage();

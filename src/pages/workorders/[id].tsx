@@ -97,6 +97,7 @@ export default function WorkOrderDetail() {
   } = useWorkOrderStore();
 
   const [repairRecord, setRepairRecord] = useState<RepairRecord | null>(null);
+  const [repairRecords, setRepairRecords] = useState<RepairRecord[]>([]);
   const [completeModalVisible, setCompleteModalVisible] = useState(false);
   const [transferModalVisible, setTransferModalVisible] = useState(false);
   const [completeForm] = Form.useForm();
@@ -104,6 +105,7 @@ export default function WorkOrderDetail() {
   const [partsList, setPartsList] = useState<WorkOrderPart[]>([]);
   const [beforeImages, setBeforeImages] = useState<string[]>([]);
   const [afterImages, setAfterImages] = useState<string[]>([]);
+  const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -122,14 +124,20 @@ export default function WorkOrderDetail() {
   const loadRepairRecord = async () => {
     if (!currentWorkOrder) return;
     try {
-      const records = await repairRecordService.getAll({
-        workOrderId: currentWorkOrder.id,
-      });
+      const records = await repairRecordService.getByWorkOrderId(currentWorkOrder.id);
+      setRepairRecords(records);
       if (records.length > 0) {
         setRepairRecord(records[0]);
-        setBeforeImages([
-          'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=medical%20equipment%20repair%20broken%20machine&image_size=square',
-        ]);
+        if (records[0].beforePhotos && records[0].beforePhotos.length > 0) {
+          setBeforeImages(records[0].beforePhotos);
+        } else {
+          setBeforeImages([
+            'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=medical%20equipment%20repair%20broken%20machine&image_size=square',
+          ]);
+        }
+        if (records[0].afterPhotos && records[0].afterPhotos.length > 0) {
+          setAfterImages(records[0].afterPhotos);
+        }
       } else {
         setBeforeImages([
           'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=medical%20equipment%20repair%20broken%20machine&image_size=square',
@@ -221,23 +229,30 @@ export default function WorkOrderDetail() {
       const values = await completeForm.validateFields();
       if (!workOrder) return;
 
+      setCompleting(true);
+
       const data = {
         actualTime: values.actualTime,
         failureAnalysis: values.failureAnalysis,
         solution: values.solution,
         parts: partsList,
-        images: afterImages,
+        beforePhotos: beforeImages,
+        afterPhotos: afterImages,
       };
 
-      const success = await completeWorkOrder(workOrder.id, data);
-      if (success) {
-        message.success('工单已完成');
+      const record = await completeWorkOrder(workOrder.id, data);
+      if (record) {
+        message.success('维修完成，维修单已生成');
         setCompleteModalVisible(false);
+        loadRepairRecord();
       } else {
-        message.error('操作失败，请重试');
+        const { error } = useWorkOrderStore.getState();
+        message.error(error || '操作失败，请重试');
       }
     } catch {
       message.error('请填写完整信息');
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -508,76 +523,134 @@ export default function WorkOrderDetail() {
         </Col>
       </Row>
 
-      {repairRecord && (
-        <Card title="维修记录" extra={<Tag color="success">已完成</Tag>}>
-          <Descriptions column={2} bordered size="middle">
-            <Descriptions.Item label="故障原因">
-              {repairRecord.diagnosis}
-            </Descriptions.Item>
-            <Descriptions.Item label="故障描述">
-              {repairRecord.faultDescription}
-            </Descriptions.Item>
-            <Descriptions.Item label="解决方案" span={2}>
-              {repairRecord.solution}
-            </Descriptions.Item>
-            <Descriptions.Item label="维修工程师">
-              {repairRecord.technicianName}
-            </Descriptions.Item>
-            <Descriptions.Item label="维修时间">
-              {dayjs(repairRecord.startTime).format('YYYY-MM-DD HH:mm')} -{' '}
-              {dayjs(repairRecord.endTime).format('HH:mm')}
-            </Descriptions.Item>
-            <Descriptions.Item label="停机时长">
-              {Math.round(
-                (dayjs(repairRecord.endTime).valueOf() -
-                  dayjs(repairRecord.startTime).valueOf()) /
-                  60000
-              )}{' '}
-              分钟
-            </Descriptions.Item>
-            <Descriptions.Item label="维修费用">
-              <Text strong type="danger">
-                ¥{repairRecord.totalCost.toLocaleString()}
-              </Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="是否保修">
-              {repairRecord.warranty ? (
-                <Tag color="green">是</Tag>
-              ) : (
-                <Tag color="orange">否</Tag>
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label="更换配件" span={2}>
-              {repairRecord.partsUsed.length > 0 ? (
-                <List
-                  dataSource={repairRecord.partsUsed}
-                  renderItem={(part) => (
-                    <List.Item>
-                      <Space>
-                        <Text>{part.name}</Text>
-                        <Text type="secondary">{part.model}</Text>
-                        <Text>x{part.quantity}</Text>
-                        <Text type="secondary">
-                          ¥{part.unitPrice.toLocaleString()}
-                        </Text>
-                        <Text strong>
-                          ¥{part.totalPrice.toLocaleString()}
-                        </Text>
-                      </Space>
-                    </List.Item>
-                  )}
+      {repairRecords.length > 0 ? (
+        <Card title="维修记录" extra={<Tag color="success">共 {repairRecords.length} 条记录</Tag>}>
+          <List
+            itemLayout="vertical"
+            dataSource={repairRecords}
+            renderItem={(record, idx) => (
+              <List.Item key={record.id}>
+                <List.Item.Meta
+                  title={
+                    <Space>
+                      <Text strong>维修记录 #{idx + 1}</Text>
+                      <Tag color="green">已完成</Tag>
+                      {record.warranty && <Tag color="blue">保修</Tag>}
+                    </Space>
+                  }
+                  description={
+                    <Text type="secondary">
+                      <ToolOutlined className="mr-1" />
+                      工程师：{record.technicianName}
+                      <Divider type="vertical" />
+                      <ClockCircleOutlined className="mr-1" />
+                      {dayjs(record.startTime).format('YYYY-MM-DD HH:mm')} -{' '}
+                      {dayjs(record.endTime).format('HH:mm')}
+                      <Divider type="vertical" />
+                      <DollarOutlined className="mr-1" />
+                      费用：
+                      <Text strong type="danger">
+                        ¥{record.totalCost.toLocaleString()}
+                      </Text>
+                      <Divider type="vertical" />
+                      用时：{record.actualDuration || Math.round(
+                        (dayjs(record.endTime).valueOf() -
+                          dayjs(record.startTime).valueOf()) /
+                          60000
+                      )}{' '}
+                      分钟
+                    </Text>
+                  }
                 />
-              ) : (
-                <Text type="secondary">无</Text>
-              )}
-            </Descriptions.Item>
-            {repairRecord.remarks && (
-              <Descriptions.Item label="备注" span={2}>
-                {repairRecord.remarks}
-              </Descriptions.Item>
+                <Descriptions column={2} bordered size="small" className="mt-2">
+                  <Descriptions.Item label="故障原因">
+                    {record.diagnosis}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="故障描述">
+                    {record.faultDescription}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="解决方案" span={2}>
+                    {record.solution}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="更换配件" span={2}>
+                    {record.partsUsed.length > 0 ? (
+                      <List
+                        dataSource={record.partsUsed}
+                        size="small"
+                        renderItem={(part) => (
+                          <List.Item>
+                            <Space>
+                              <Text strong>{part.name}</Text>
+                              <Text type="secondary">{part.model}</Text>
+                              <Tag color="blue">x{part.quantity}</Tag>
+                              <Text type="secondary">
+                                单价¥{part.unitPrice.toLocaleString()}
+                              </Text>
+                              <Text strong>
+                                小计¥{part.totalPrice.toLocaleString()}
+                              </Text>
+                            </Space>
+                          </List.Item>
+                        )}
+                      />
+                    ) : (
+                      <Text type="secondary">无配件更换</Text>
+                    )}
+                  </Descriptions.Item>
+                  {(record.beforePhotos?.length || record.afterPhotos?.length) ? (
+                    <>
+                      {record.beforePhotos && record.beforePhotos.length > 0 && (
+                        <Descriptions.Item label="维修前照片">
+                          <Image.PreviewGroup>
+                            <Space wrap>
+                              {record.beforePhotos.map((p, i) => (
+                                <Image
+                                  key={i}
+                                  width={100}
+                                  height={100}
+                                  src={p}
+                                  className="rounded object-cover"
+                                />
+                              ))}
+                            </Space>
+                          </Image.PreviewGroup>
+                        </Descriptions.Item>
+                      )}
+                      {record.afterPhotos && record.afterPhotos.length > 0 && (
+                        <Descriptions.Item label="维修后照片">
+                          <Image.PreviewGroup>
+                            <Space wrap>
+                              {record.afterPhotos.map((p, i) => (
+                                <Image
+                                  key={i}
+                                  width={100}
+                                  height={100}
+                                  src={p}
+                                  className="rounded object-cover border-2 border-green-200"
+                                />
+                              ))}
+                            </Space>
+                          </Image.PreviewGroup>
+                        </Descriptions.Item>
+                      )}
+                    </>
+                  ) : null}
+                  {record.remarks && (
+                    <Descriptions.Item label="备注" span={2}>
+                      {record.remarks}
+                    </Descriptions.Item>
+                  )}
+                </Descriptions>
+              </List.Item>
             )}
-          </Descriptions>
+          />
         </Card>
+      ) : (
+        workOrder.status === 'completed' && (
+          <Card title="维修记录">
+            <Empty description="暂无维修记录" />
+          </Card>
+        )
       )}
 
       {workOrder.status === 'in_progress' && (
@@ -645,6 +718,7 @@ export default function WorkOrderDetail() {
         onCancel={() => setCompleteModalVisible(false)}
         okText="确认完成"
         cancelText="取消"
+        confirmLoading={completing}
       >
         <Form form={completeForm} layout="vertical">
           <Row gutter={16}>

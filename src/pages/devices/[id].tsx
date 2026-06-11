@@ -19,6 +19,7 @@ import {
   Popconfirm,
   Spin,
   Empty,
+  Upload,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -29,7 +30,9 @@ import {
   ClockCircleOutlined,
   ScissorOutlined,
   SafetyOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
+import type { UploadProps } from 'antd';
 import { QRCodeSVG } from 'qrcode.react';
 import dayjs from 'dayjs';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -93,6 +96,21 @@ const workOrderStatusName: Record<string, string> = {
   cancelled: '已取消',
 };
 
+const faultCodeOptions = [
+  { value: 'F001', label: 'F001-机械故障' },
+  { value: 'F002', label: 'F002-电路故障' },
+  { value: 'F003', label: 'F003-软件异常' },
+  { value: 'F004', label: 'F004-显示异常' },
+  { value: 'F005', label: 'F005-报警异常' },
+  { value: 'F999', label: 'F999-其他' },
+];
+
+const priorityOptions = [
+  { value: 'high', label: '高 - 影响生命支持设备' },
+  { value: 'medium', label: '中 - 影响诊断' },
+  { value: 'low', label: '低 - 不影响使用' },
+];
+
 export default function DeviceDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -104,6 +122,8 @@ export default function DeviceDetail() {
   const [repairModalVisible, setRepairModalVisible] = useState(false);
   const [repairForm] = Form.useForm();
   const [qrModalVisible, setQrModalVisible] = useState(false);
+  const [faultPhotoList, setFaultPhotoList] = useState<UploadProps['fileList']>([]);
+  const [repairSubmitting, setRepairSubmitting] = useState(false);
   const [repairRecords, setRepairRecords] = useState<RepairRecord[]>([]);
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
   const [calibrationRecords, setCalibrationRecords] = useState<CalibrationRecord[]>([]);
@@ -126,7 +146,7 @@ export default function DeviceDetail() {
     setRecordsLoading(true);
     try {
       const [repairs, maintenances, calibrations] = await Promise.all([
-        repairRecordService.getAll({ deviceId: selectedDevice.id }),
+        repairRecordService.getByDeviceId(selectedDevice.id),
         maintenancePlanService.getAll({ deviceId: selectedDevice.id }),
         calibrationRecordService.getAll({ deviceId: selectedDevice.id }),
       ]);
@@ -220,10 +240,22 @@ export default function DeviceDetail() {
     );
   }, [selectedDevice]);
 
+  const handleOpenRepair = () => {
+    repairForm.resetFields();
+    setFaultPhotoList([]);
+    setRepairModalVisible(true);
+  };
+
   const handleRepair = async () => {
     try {
       const values = await repairForm.validateFields();
       if (!selectedDevice) return;
+
+      setRepairSubmitting(true);
+
+      const faultPhotos = faultPhotoList.map(
+        (f) => f.url || f.name || `photo_${Date.now()}_${f.uid}`
+      );
 
       const workOrder = await createRepair({
         deviceId: selectedDevice.id,
@@ -237,17 +269,23 @@ export default function DeviceDetail() {
         reporterId: user?.id || '',
         reporterName: user?.name || '',
         estimatedTime: 120,
+        faultCode: values.faultCode,
+        faultPhotos,
       });
 
       if (workOrder) {
-        message.success('报修成功，工单已创建');
+        const assigneeName = workOrder.assigneeName || '系统指派工程师';
+        message.success(`报修成功，已自动派单给${assigneeName}`);
         setRepairModalVisible(false);
+        setFaultPhotoList([]);
         navigate(`/workorders/${workOrder.id}`);
       } else {
         message.error('报修失败，请重试');
       }
     } catch {
       message.error('请填写完整信息');
+    } finally {
+      setRepairSubmitting(false);
     }
   };
 
@@ -275,6 +313,12 @@ export default function DeviceDetail() {
         dayjs(a.startTime).valueOf() - dayjs(b.startTime).valueOf(),
     },
     {
+      title: '故障原因',
+      dataIndex: 'diagnosis',
+      key: 'diagnosis',
+      render: (v: string) => v || '-',
+    },
+    {
       title: '故障描述',
       dataIndex: 'faultDescription',
       key: 'faultDescription',
@@ -290,10 +334,39 @@ export default function DeviceDetail() {
       key: 'technicianName',
     },
     {
+      title: '实际用时',
+      key: 'actualDuration',
+      render: (_: any, r: RepairRecord) => {
+        const duration = r.actualDuration || Math.round(
+          (dayjs(r.endTime).valueOf() - dayjs(r.startTime).valueOf()) / 60000
+        );
+        return `${duration} 分钟`;
+      },
+    },
+    {
+      title: '更换配件',
+      key: 'partsUsed',
+      render: (_: any, r: RepairRecord) => {
+        if (!r.partsUsed || r.partsUsed.length === 0) return '-';
+        return (
+          <Space direction="vertical" size={4}>
+            {r.partsUsed.map((p) => (
+              <div key={p.id}>
+                <Text strong>{p.name}</Text>
+                <Text type="secondary"> x{p.quantity}</Text>
+              </div>
+            ))}
+          </Space>
+        );
+      },
+    },
+    {
       title: '费用',
       dataIndex: 'totalCost',
       key: 'totalCost',
-      render: (cost: number) => `¥${cost.toLocaleString()}`,
+      render: (cost: number) => (
+        <Text strong type="danger">¥{cost.toLocaleString()}</Text>
+      ),
       sorter: (a: RepairRecord, b: RepairRecord) => a.totalCost - b.totalCost,
     },
     {
@@ -531,10 +604,7 @@ export default function DeviceDetail() {
           <Button
             type="primary"
             icon={<ToolOutlined />}
-            onClick={() => {
-              repairForm.resetFields();
-              setRepairModalVisible(true);
-            }}
+            onClick={handleOpenRepair}
             disabled={selectedDevice.status === 'scrapped'}
           >
             报修
@@ -745,17 +815,29 @@ export default function DeviceDetail() {
         onCancel={() => setRepairModalVisible(false)}
         okText="提交报修"
         cancelText="取消"
+        confirmLoading={repairSubmitting}
+        width={600}
       >
         {selectedDevice && (
           <div className="mb-4 p-3 bg-gray-50 rounded">
-            <Text strong>设备：</Text>
-            <Text>{selectedDevice.name}</Text>
-            <br />
-            <Text strong>型号：</Text>
-            <Text type="secondary">{selectedDevice.model}</Text>
-            <br />
-            <Text strong>位置：</Text>
-            <Text type="secondary">{selectedDevice.location}</Text>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Text strong>设备名称：</Text>
+                <Text>{selectedDevice.name}</Text>
+              </Col>
+              <Col span={12}>
+                <Text strong>型号：</Text>
+                <Text type="secondary">{selectedDevice.model}</Text>
+              </Col>
+              <Col span={12}>
+                <Text strong>所属科室：</Text>
+                <Text type="secondary">{selectedDevice.department}</Text>
+              </Col>
+              <Col span={12}>
+                <Text strong>放置位置：</Text>
+                <Text type="secondary">{selectedDevice.location}</Text>
+              </Col>
+            </Row>
           </div>
         )}
         <Form form={repairForm} layout="vertical">
@@ -766,24 +848,59 @@ export default function DeviceDetail() {
           >
             <Input placeholder="请简要描述故障" />
           </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="faultCode"
+                label="故障代码"
+                rules={[{ required: true, message: '请选择故障代码' }]}
+              >
+                <Select placeholder="请选择故障代码">
+                  {faultCodeOptions.map((opt) => (
+                    <Option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="priority"
+                label="优先级"
+                rules={[{ required: true, message: '请选择优先级' }]}
+              >
+                <Select placeholder="请选择优先级">
+                  {priorityOptions.map((opt) => (
+                    <Option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item
             name="description"
             label="故障描述"
             rules={[{ required: true, message: '请描述故障情况' }]}
           >
-            <Input.TextArea rows={4} placeholder="请详细描述设备故障情况" />
+            <Input.TextArea rows={4} placeholder="请详细描述设备故障情况、现象、发生时间等" />
           </Form.Item>
-          <Form.Item
-            name="priority"
-            label="优先级"
-            rules={[{ required: true, message: '请选择优先级' }]}
-          >
-            <Select placeholder="请选择优先级">
-              <Option value="low">低</Option>
-              <Option value="medium">中</Option>
-              <Option value="high">高</Option>
-              <Option value="urgent">紧急</Option>
-            </Select>
+          <Form.Item label="故障照片（至少支持3张）">
+            <Upload
+              listType="picture-card"
+              fileList={faultPhotoList}
+              onChange={({ fileList }) => setFaultPhotoList(fileList)}
+              beforeUpload={() => false}
+              multiple
+              maxCount={9}
+            >
+              <div>
+                <UploadOutlined />
+                <div style={{ marginTop: 8 }}>上传照片</div>
+              </div>
+            </Upload>
           </Form.Item>
         </Form>
       </Modal>

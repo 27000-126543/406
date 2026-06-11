@@ -1,10 +1,12 @@
 import { create } from 'zustand';
-import type { User, WorkOrder, Inventory } from '@/types';
+import type { User, WorkOrder, Inventory, RepairRecord, RepairPart } from '@/types';
 import {
   userService,
   workOrderService,
   inventoryService,
   messageService,
+  repairRecordService,
+  deviceService,
 } from '@/services/mock';
 import { useAuthStore } from './useAuthStore';
 import { useMessageStore } from './useMessageStore';
@@ -29,6 +31,14 @@ export interface TransferRecord {
   timestamp: string;
 }
 
+interface EngineerScore {
+  engineer: User;
+  score: number;
+  successRate: number;
+  currentWorkload: number;
+  deptMatch: boolean;
+}
+
 interface WorkOrderState {
   workOrders: WorkOrder[];
   currentWorkOrder: WorkOrder | null;
@@ -45,10 +55,21 @@ interface WorkOrderActions {
   fetchWorkOrderById: (id: string) => Promise<WorkOrder | undefined>;
   selectWorkOrder: (workOrder: WorkOrder | null) => void;
   createRepair: (
-    data: Omit<WorkOrder, 'id' | 'status' | 'createdAt' | 'updatedAt'>
+    data: Omit<WorkOrder, 'id' | 'status' | 'createdAt' | 'updatedAt'> & {
+      faultCode?: string;
+      faultPhotos?: string[];
+    }
   ) => Promise<WorkOrder | null>;
-  smartDispatch: (workOrderId: string) => Promise<User | null>;
-  assignWorkOrder: (workOrderId: string, engineerId: string) => Promise<boolean>;
+  smartDispatch: (workOrderId: string) => Promise<{ assignee: User | null; backup: User | null }>;
+  assignWorkOrder: (
+    workOrderId: string,
+    engineerId: string,
+    options?: {
+      backupAssigneeId?: string;
+      isLocked?: boolean;
+      autoReassignedCount?: number;
+    }
+  ) => Promise<boolean>;
   acceptWorkOrder: (workOrderId: string) => Promise<boolean>;
   startRepair: (workOrderId: string) => Promise<boolean>;
   completeWorkOrder: (
@@ -59,8 +80,10 @@ interface WorkOrderActions {
       solution: string;
       parts?: WorkOrderPart[];
       images?: string[];
+      beforePhotos?: string[];
+      afterPhotos?: string[];
     }
-  ) => Promise<boolean>;
+  ) => Promise<RepairRecord | null>;
   transferWorkOrder: (
     workOrderId: string,
     toEngineerId: string,
@@ -79,6 +102,15 @@ interface WorkOrderActions {
   clearError: () => void;
   reset: () => void;
 }
+
+const calculateEngineerSuccessRate = (engineerId: string, workOrders: WorkOrder[]): number => {
+  const engineerOrders = workOrders.filter(
+    (w) => w.assigneeId === engineerId && ['completed', 'cancelled'].includes(w.status)
+  );
+  if (engineerOrders.length === 0) return 0.85;
+  const completed = engineerOrders.filter((w) => w.status === 'completed').length;
+  return completed / engineerOrders.length;
+};
 
 export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
   (set, get) => ({
@@ -129,23 +161,57 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
           ...data,
           reporterId: currentUser?.id || data.reporterId,
           reporterName: currentUser?.name || data.reporterName,
+          faultCode: data.faultCode,
+          faultPhotos: data.faultPhotos,
+          autoReassignedCount: 0,
+        } as any);
+
+        const workOrderId = workOrder.id;
+        const updatedWorkOrder = await workOrderService.update(workOrderId, {
+          faultCode: data.faultCode,
+          faultPhotos: data.faultPhotos,
+          autoReassignedCount: 0,
         });
+
+        const finalWorkOrder = updatedWorkOrder || workOrder;
+
         set((state) => ({
-          workOrders: [workOrder, ...state.workOrders],
+          workOrders: [finalWorkOrder, ...state.workOrders],
           loading: false,
         }));
 
-        const { sendMessage } = useMessageStore.getState();
-        await sendMessage({
-          type: 'work_order',
-          title: '新工单创建',
-          content: `新工单 ${workOrder.id} 已创建，等待分配。`,
-          receiverId: '4',
-          relatedId: workOrder.id,
-          relatedType: 'workorder',
-        });
+        const { assignee, backup } = await get().smartDispatch(workOrderId);
 
-        return workOrder;
+        if (assignee) {
+          await get().assignWorkOrder(workOrderId, assignee.id, {
+            backupAssigneeId: backup?.id,
+            isLocked: true,
+          });
+
+          const { sendMessage } = useMessageStore.getState();
+          await sendMessage({
+            type: 'work_order',
+            title: '新工单待处理',
+            content: `您有新工单待处理 - ${finalWorkOrder.deviceName}`,
+            receiverId: assignee.id,
+            relatedId: workOrderId,
+            relatedType: 'workorder',
+          });
+
+          await sendMessage({
+            type: 'work_order',
+            title: '工单已派单',
+            content: `工单已派单 - ${workOrderId}`,
+            receiverId: finalWorkOrder.reporterId,
+            relatedId: workOrderId,
+            relatedType: 'workorder',
+          });
+        }
+
+        const refreshedOrders = await workOrderService.getAll();
+        set({ workOrders: refreshedOrders });
+        const refreshed = await workOrderService.getById(workOrderId);
+        return refreshed || finalWorkOrder;
       } catch {
         set({ error: '创建报修单失败', loading: false });
         return null;
@@ -162,59 +228,59 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
 
       const workOrder = workOrders.find((w) => w.id === workOrderId);
       const currentEngineers = get().engineers;
+      const allWorkOrders = get().workOrders;
 
       if (!workOrder) {
         set({ error: '工单不存在', loading: false });
-        return null;
+        return { assignee: null, backup: null };
       }
 
       if (currentEngineers.length === 0) {
         set({ error: '没有可用工程师', loading: false });
-        return null;
+        return { assignee: null, backup: null };
       }
 
-      const scoredEngineers = currentEngineers.map((engineer) => {
+      const scoredEngineers: EngineerScore[] = currentEngineers.map((engineer) => {
         let score = 0;
 
-        const assignedOrders = workOrders.filter(
+        const successRate = calculateEngineerSuccessRate(engineer.id, allWorkOrders);
+        score += successRate * 50;
+
+        const currentWorkload = allWorkOrders.filter(
           (w) =>
             w.assigneeId === engineer.id &&
             ['assigned', 'in_progress'].includes(w.status)
         ).length;
-        score -= assignedOrders * 10;
+        score -= currentWorkload * 10;
 
-        if (engineer.department) {
-          if (engineer.department === workOrder.department) {
-            score += 20;
-          }
+        const deptMatch = engineer.department === workOrder.department;
+        if (deptMatch) {
+          score += 30;
         }
 
-        if (workOrder.priority === 'urgent') {
-          score += 5;
+        if (workOrder.priority === 'urgent' || workOrder.priority === 'high') {
+          score += 10;
         }
 
-        return { engineer, score };
+        return {
+          engineer,
+          score,
+          successRate,
+          currentWorkload,
+          deptMatch,
+        };
       });
 
       scoredEngineers.sort((a, b) => b.score - a.score);
-      const bestEngineer = scoredEngineers[0].engineer;
 
-      const { sendMessage } = useMessageStore.getState();
-      await get().assignWorkOrder(workOrderId, bestEngineer.id);
-      await sendMessage({
-        type: 'work_order',
-        title: '工单智能分配',
-        content: `工单 ${workOrderId} 已智能分配给 ${bestEngineer.name}。`,
-        receiverId: bestEngineer.id,
-        relatedId: workOrderId,
-        relatedType: 'workorder',
-      });
+      const bestEngineer = scoredEngineers[0]?.engineer || null;
+      const backupEngineer = scoredEngineers[1]?.engineer || null;
 
       set({ loading: false });
-      return bestEngineer;
+      return { assignee: bestEngineer, backup: backupEngineer };
     },
 
-    assignWorkOrder: async (workOrderId, engineerId) => {
+    assignWorkOrder: async (workOrderId, engineerId, options) => {
       set({ loading: true, error: null });
       const { engineers, fetchEngineers } = get();
 
@@ -228,10 +294,20 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
         return false;
       }
 
+      const backupEngineer = options?.backupAssigneeId
+        ? get().engineers.find((e) => e.id === options.backupAssigneeId)
+        : undefined;
+
       const updatedWorkOrder = await workOrderService.assign(
         workOrderId,
         engineerId,
-        engineer.name
+        engineer.name,
+        {
+          backupAssigneeId: options?.backupAssigneeId,
+          backupAssigneeName: backupEngineer?.name,
+          isLocked: options?.isLocked,
+          autoReassignedCount: options?.autoReassignedCount,
+        }
       );
 
       if (updatedWorkOrder) {
@@ -262,16 +338,6 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
           return { transferTimers: newTimers };
         });
 
-        const { sendMessage } = useMessageStore.getState();
-        await sendMessage({
-          type: 'work_order',
-          title: '新工单分配',
-          content: `您有一个新工单 ${workOrderId} 待处理，请在15分钟内接单。`,
-          receiverId: engineerId,
-          relatedId: workOrderId,
-          relatedType: 'workorder',
-        });
-
         return true;
       }
 
@@ -295,24 +361,56 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
       const history = transferHistory.get(workOrderId) || [];
       if (history.length >= 3) {
         const { sendMessage } = useMessageStore.getState();
+        const director = useAuthStore.getState().users.find((u) => u.role === 'director');
         await sendMessage({
           type: 'system',
           title: '工单转派超限',
           content: `工单 ${workOrderId} 已自动转派3次，请管理员介入处理。`,
-          receiverId: '4',
+          receiverId: director?.id || 'u001',
           relatedId: workOrderId,
           relatedType: 'workorder',
         });
         return;
       }
 
-      const otherEngineers = engineers.filter(
-        (e) => e.id !== workOrder.assigneeId
-      );
+      let nextEngineer: User | undefined;
 
-      if (otherEngineers.length > 0) {
-        const nextEngineer =
-          otherEngineers[Math.floor(Math.random() * otherEngineers.length)];
+      if (workOrder.backupAssigneeId) {
+        nextEngineer = engineers.find((e) => e.id === workOrder.backupAssigneeId);
+      }
+
+      if (!nextEngineer) {
+        const otherEngineers = engineers.filter(
+          (e) => e.id !== workOrder.assigneeId
+        );
+        if (otherEngineers.length > 0) {
+          const allWorkOrders = get().workOrders;
+          const scored = otherEngineers.map((e) => {
+            const successRate = calculateEngineerSuccessRate(e.id, allWorkOrders);
+            const workload = allWorkOrders.filter(
+              (w) => w.assigneeId === e.id && ['assigned', 'in_progress'].includes(w.status)
+            ).length;
+            return { engineer: e, score: successRate * 50 - workload * 10 };
+          });
+          scored.sort((a, b) => b.score - a.score);
+          nextEngineer = scored[0]?.engineer;
+        }
+      }
+
+      if (nextEngineer) {
+        const oldAssigneeId = workOrder.assigneeId;
+        const oldAssigneeName = workOrder.assigneeName;
+
+        const { sendMessage } = useMessageStore.getState();
+        await sendMessage({
+          type: 'work_order',
+          title: '工单已转派',
+          content: `工单 ${workOrderId} 因15分钟未接单，已自动转派给 ${nextEngineer.name}。`,
+          receiverId: oldAssigneeId || '',
+          relatedId: workOrderId,
+          relatedType: 'workorder',
+        });
+
         await get().transferWorkOrder(
           workOrderId,
           nextEngineer.id,
@@ -354,7 +452,7 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
       }
 
       const updatedWorkOrder = await workOrderService.update(workOrderId, {
-        status: 'in_progress',
+        status: 'accepted',
       });
 
       if (updatedWorkOrder) {
@@ -401,12 +499,15 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
         return false;
       }
 
-      if (workOrder.status !== 'assigned' && workOrder.status !== 'in_progress') {
+      if (!['assigned', 'accepted', 'in_progress'].includes(workOrder.status)) {
         set({ error: '工单状态不正确', loading: false });
         return false;
       }
 
-      const updatedWorkOrder = await workOrderService.startProgress(workOrderId);
+      const updatedWorkOrder = await workOrderService.update(workOrderId, {
+        status: 'in_progress',
+        startedAt: new Date().toISOString(),
+      });
 
       if (updatedWorkOrder) {
         set((state) => ({
@@ -434,12 +535,12 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
 
       if (!workOrder) {
         set({ error: '工单不存在', loading: false });
-        return false;
+        return null;
       }
 
       if (workOrder.assigneeId !== currentUser?.id) {
         set({ error: '您不是该工单的负责人', loading: false });
-        return false;
+        return null;
       }
 
       if (data.parts && data.parts.length > 0) {
@@ -449,7 +550,7 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
             error: `配件库存不足：${stockCheck.insufficientParts.map((p) => p.partName).join(', ')}`,
             loading: false,
           });
-          return false;
+          return null;
         }
 
         for (const part of data.parts) {
@@ -462,33 +563,108 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
         data.actualTime
       );
 
-      if (updatedWorkOrder) {
-        set((state) => ({
-          workOrders: state.workOrders.map((w) =>
+      if (!updatedWorkOrder) {
+        set({ error: '完工失败', loading: false });
+        return null;
+      }
+
+      const partsUsed: RepairPart[] = (data.parts || []).map((p, idx) => ({
+        id: `rp${Date.now()}${idx}`,
+        name: p.partName,
+        model: '',
+        quantity: p.quantity,
+        unitPrice: p.unitPrice,
+        totalPrice: p.unitPrice * p.quantity,
+        fromInventory: true,
+      }));
+
+      const totalPartsCost = partsUsed.reduce((sum, p) => sum + p.totalPrice, 0);
+      const laborCost = (data.actualTime || 0) * 5;
+      const totalCost = totalPartsCost + laborCost;
+
+      const startTime = workOrder.startedAt || workOrder.updatedAt;
+      const endTime = new Date().toISOString();
+
+      const repairRecord = await repairRecordService.create({
+        deviceId: workOrder.deviceId,
+        deviceName: workOrder.deviceName,
+        workOrderId: workOrderId,
+        faultDescription: workOrder.description,
+        diagnosis: data.failureAnalysis,
+        solution: data.solution,
+        partsUsed,
+        technicianId: currentUser.id,
+        technicianName: currentUser.name,
+        startTime,
+        endTime,
+        totalCost,
+        warranty: false,
+        status: 'completed',
+        beforePhotos: data.beforePhotos || workOrder.faultPhotos || [],
+        afterPhotos: data.afterPhotos || [],
+        actualDuration: data.actualTime,
+      });
+
+      if (repairRecord) {
+        await deviceService.update(workOrder.deviceId, {
+          status: 'normal',
+        });
+
+        set((state) => {
+          const updatedDevices = state.workOrders.map((w) =>
             w.id === workOrderId ? updatedWorkOrder : w
-          ),
-          currentWorkOrder:
-            state.currentWorkOrder?.id === workOrderId
-              ? updatedWorkOrder
-              : state.currentWorkOrder,
-          loading: false,
-        }));
+          );
+          return {
+            workOrders: updatedDevices,
+            currentWorkOrder:
+              state.currentWorkOrder?.id === workOrderId
+                ? updatedWorkOrder
+                : state.currentWorkOrder,
+            loading: false,
+          };
+        });
 
         const { sendMessage } = useMessageStore.getState();
+        const allUsers = useAuthStore.getState().users;
+
         await sendMessage({
           type: 'work_order',
           title: '工单已完成',
-          content: `工单 ${workOrderId} 已由 ${currentUser.name} 完成，用时 ${data.actualTime} 分钟。`,
+          content: `工单 ${workOrderId}（${workOrder.deviceName}）已由 ${currentUser.name} 完成，用时 ${data.actualTime} 分钟，维修单已生成。`,
           receiverId: workOrder.reporterId,
           relatedId: workOrderId,
           relatedType: 'workorder',
         });
 
-        return true;
+        const nurse = allUsers.find((u) => u.role === 'nurse');
+        if (nurse) {
+          await sendMessage({
+            type: 'work_order',
+            title: '设备维修完成',
+            content: `${workOrder.deviceName} 维修已完成，请验收。工单：${workOrderId}`,
+            receiverId: nurse.id,
+            relatedId: workOrder.deviceId,
+            relatedType: 'device',
+          });
+        }
+
+        const director = allUsers.find((u) => u.role === 'director');
+        if (director) {
+          await sendMessage({
+            type: 'work_order',
+            title: '工单完成通知',
+            content: `工单 ${workOrderId}（${workOrder.deviceName}）已完成，总费用 ¥${totalCost.toLocaleString()}。`,
+            receiverId: director.id,
+            relatedId: workOrderId,
+            relatedType: 'workorder',
+          });
+        }
+
+        return repairRecord;
       }
 
-      set({ error: '完工失败', loading: false });
-      return false;
+      set({ error: '创建维修记录失败', loading: false });
+      return null;
     },
 
     transferWorkOrder: async (workOrderId, toEngineerId, reason) => {
@@ -530,11 +706,16 @@ export const useWorkOrderStore = create<WorkOrderState & WorkOrderActions>(
       };
 
       const newHistory = [...history, transferRecord];
+      const newCount = (workOrder.autoReassignedCount || 0) + 1;
 
       const updatedWorkOrder = await workOrderService.assign(
         workOrderId,
         toEngineerId,
-        toEngineer.name
+        toEngineer.name,
+        {
+          autoReassignedCount: newCount,
+          isLocked: true,
+        }
       );
 
       if (updatedWorkOrder) {

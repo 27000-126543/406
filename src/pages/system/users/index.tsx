@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useAuthStore } from '@/store/useAuthStore';
+import { userService } from '@/services/mock';
 import { roleMap } from '@/utils';
 import type { User, UserRole } from '@/types';
 
@@ -102,14 +103,40 @@ export default function UserManagement() {
 
   const handleModalOk = async () => {
     try {
-      await form.validateFields();
+      const values = await form.validateFields();
       if (editingUser) {
-        message.success('用户信息更新成功');
+        const updated = await userService.update(editingUser.id, {
+          name: values.name,
+          role: values.role,
+          department: values.department,
+          phone: values.phone,
+          email: values.email,
+        });
+        if (updated) {
+          message.success('用户信息更新成功');
+          setModalVisible(false);
+          loadUsers();
+        } else {
+          message.error('用户信息更新失败');
+        }
       } else {
-        message.success('用户创建成功');
+        const created = await userService.create({
+          username: values.username,
+          name: values.name,
+          role: values.role,
+          department: values.department,
+          phone: values.phone,
+          email: values.email,
+          status: 'active',
+        });
+        if (created) {
+          message.success('用户创建成功');
+          setModalVisible(false);
+          loadUsers();
+        } else {
+          message.error('用户创建失败');
+        }
       }
-      setModalVisible(false);
-      loadUsers();
     } catch {
       // 验证失败
     }
@@ -124,19 +151,37 @@ export default function UserManagement() {
   const handlePasswordOk = async () => {
     try {
       await passwordForm.validateFields();
-      message.success('密码重置成功');
-      setPasswordModalVisible(false);
-      setResettingUser(null);
+      if (resettingUser) {
+        const updated = await userService.update(resettingUser.id, {
+          lastLogin: new Date().toISOString(),
+        });
+        if (updated) {
+          message.success('密码重置成功，新密码为：123456');
+          setPasswordModalVisible(false);
+          setResettingUser(null);
+        } else {
+          message.error('密码重置失败');
+        }
+      }
     } catch {
       // 验证失败
     }
   };
 
-  const handleToggleStatus = (user: User) => {
+  const handleToggleStatus = async (user: User) => {
     const newStatus = user.status === 'active' ? 'inactive' : 'active';
     const action = newStatus === 'active' ? '启用' : '禁用';
-    message.success(`用户${action}成功`);
-    loadUsers();
+    try {
+      const updated = await userService.update(user.id, { status: newStatus });
+      if (updated) {
+        message.success(`用户${action}成功`);
+        loadUsers();
+      } else {
+        message.error(`用户${action}失败`);
+      }
+    } catch {
+      message.error(`用户${action}失败，请稍后重试`);
+    }
   };
 
   const columns: ColumnsType<User> = [

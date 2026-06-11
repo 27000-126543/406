@@ -173,20 +173,26 @@ export default function MessageCenter() {
     }
   };
 
-  const handleNavigateToRelated = (msg: Message) => {
-    if (!msg.relatedType || !msg.relatedId) {
+  const handleNavigateToRelated = async (msg: Message) => {
+    if (!msg.isRead) {
+      await markAsRead(msg.id);
+    }
+
+    if (!msg.relatedType) {
       message.info('该消息没有关联页面');
       return;
     }
 
     const routeMap: Record<string, string> = {
-      work_order: '/workorders',
-      workorder: '/workorders',
-      maintenance_plan: '/maintenance/plan',
-      calibration_record: '/calibration/record',
+      work_order: msg.relatedId ? `/workorders/${msg.relatedId}` : '/workorders',
+      workorder: msg.relatedId ? `/workorders/${msg.relatedId}` : '/workorders',
+      maintenance: '/maintenance',
+      maintenance_plan: '/maintenance',
+      calibration: '/calibration',
+      calibration_record: '/calibration',
       scrap: '/scrap',
-      device: '/devices',
-      inventory: '/inventory',
+      device: msg.relatedId ? `/devices/${msg.relatedId}` : '/devices',
+      inventory: '/system/config',
       repair_record: '/repair',
     };
 
@@ -196,6 +202,19 @@ export default function MessageCenter() {
       setDetailModalVisible(false);
     } else {
       message.info('未找到相关页面');
+    }
+  };
+
+  const handleMessageCardClick = async (msg: Message) => {
+    if (!msg.isRead) {
+      await markAsRead(msg.id);
+    }
+
+    if (msg.relatedType) {
+      handleNavigateToRelated(msg);
+    } else {
+      setSelectedMessage(msg);
+      setDetailModalVisible(true);
     }
   };
 
@@ -365,7 +384,7 @@ export default function MessageCenter() {
               className={`cursor-pointer transition-colors hover:bg-bg-tertiary rounded-lg p-4 mb-2 ${
                 !msg.isRead ? 'bg-primary-lighter' : 'bg-white'
               }`}
-              onClick={() => handleViewDetail(msg)}
+              onClick={() => handleMessageCardClick(msg)}
             >
               <div className="flex items-start gap-4 w-full">
                 <Checkbox

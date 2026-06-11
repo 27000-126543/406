@@ -62,9 +62,14 @@ const Login: React.FC = () => {
   }, [error, clearError]);
 
   const onFinish: FormProps<LoginForm>['onFinish'] = async (values) => {
-    const success = await login(values.username, values.password);
+    const success = await login(values.username, values.password, values.role);
     
     if (success) {
+      const currentUser = useAuthStore.getState().user;
+      if (currentUser && currentUser.role !== values.role) {
+        message.error('登录用户角色与选择角色不一致，请重新选择');
+        return;
+      }
       if (values.remember) {
         localStorage.setItem(
           'rememberedCredentials',

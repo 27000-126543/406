@@ -23,6 +23,7 @@ import {
   mockScrapApplications,
   mockMessages,
   mockInspectionPlans,
+  saveMockDataToStorage,
 } from './data';
 
 const generateId = (prefix: string): string => {
@@ -50,13 +51,14 @@ export const userService = {
     return mockUsers.filter((u) => u.role === role);
   },
 
-  async login(username: string, password: string): Promise<User | null> {
+  async login(username: string, password: string, expectedRole?: string): Promise<User | null> {
     await delay(500);
     const user = mockUsers.find(
       (u) => u.username === username && u.status === 'active'
     );
     if (!user) return null;
     if (password !== '123456') return null;
+    if (expectedRole && user.role !== expectedRole) return null;
     return user;
   },
 
@@ -68,6 +70,7 @@ export const userService = {
       createdAt: new Date().toISOString(),
     };
     mockUsers.push(newUser);
+    saveMockDataToStorage();
     return newUser;
   },
 
@@ -76,6 +79,7 @@ export const userService = {
     const index = mockUsers.findIndex((u) => u.id === id);
     if (index === -1) return undefined;
     mockUsers[index] = { ...mockUsers[index], ...updates };
+    saveMockDataToStorage();
     return mockUsers[index];
   },
 
@@ -84,6 +88,7 @@ export const userService = {
     const index = mockUsers.findIndex((u) => u.id === id);
     if (index === -1) return false;
     mockUsers.splice(index, 1);
+    saveMockDataToStorage();
     return true;
   },
 };
@@ -160,6 +165,7 @@ export const deviceService = {
       updatedAt: now,
     };
     mockDevices.push(newDevice);
+    saveMockDataToStorage();
     return newDevice;
   },
 
@@ -172,6 +178,7 @@ export const deviceService = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
+    saveMockDataToStorage();
     return mockDevices[index];
   },
 
@@ -184,6 +191,7 @@ export const deviceService = {
     const index = mockDevices.findIndex((d) => d.id === id);
     if (index === -1) return false;
     mockDevices.splice(index, 1);
+    saveMockDataToStorage();
     return true;
   },
 };
@@ -263,6 +271,7 @@ export const workOrderService = {
       updatedAt: now,
     };
     mockWorkOrders.unshift(newOrder);
+    saveMockDataToStorage();
     return newOrder;
   },
 
@@ -278,19 +287,31 @@ export const workOrderService = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
+    saveMockDataToStorage();
     return mockWorkOrders[index];
   },
 
   async assign(
     id: string,
     assigneeId: string,
-    assigneeName: string
+    assigneeName: string,
+    options?: {
+      backupAssigneeId?: string;
+      backupAssigneeName?: string;
+      isLocked?: boolean;
+      autoReassignedCount?: number;
+    }
   ): Promise<WorkOrder | undefined> {
-    return this.update(id, {
+    const updates: Partial<WorkOrder> = {
       assigneeId,
       assigneeName,
       status: 'assigned',
-    });
+    };
+    if (options?.backupAssigneeId) updates.backupAssigneeId = options.backupAssigneeId;
+    if (options?.backupAssigneeName) updates.backupAssigneeName = options.backupAssigneeName;
+    if (options?.isLocked !== undefined) updates.isLocked = options.isLocked;
+    if (options?.autoReassignedCount !== undefined) updates.autoReassignedCount = options.autoReassignedCount;
+    return this.update(id, updates);
   },
 
   async startProgress(id: string): Promise<WorkOrder | undefined> {
@@ -318,6 +339,7 @@ export const workOrderService = {
     const index = mockWorkOrders.findIndex((o) => o.id === id);
     if (index === -1) return false;
     mockWorkOrders.splice(index, 1);
+    saveMockDataToStorage();
     return true;
   },
 };
@@ -350,6 +372,24 @@ export const repairRecordService = {
     return mockRepairRecords.find((r) => r.id === id);
   },
 
+  async getByDeviceId(deviceId: string): Promise<RepairRecord[]> {
+    await delay();
+    return mockRepairRecords
+      .filter((r) => r.deviceId === deviceId)
+      .sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  },
+
+  async getByWorkOrderId(workOrderId: string): Promise<RepairRecord[]> {
+    await delay();
+    return mockRepairRecords
+      .filter((r) => r.workOrderId === workOrderId)
+      .sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  },
+
   async create(
     record: Omit<RepairRecord, 'id' | 'createdAt'>
   ): Promise<RepairRecord> {
@@ -360,6 +400,7 @@ export const repairRecordService = {
       createdAt: new Date().toISOString(),
     };
     mockRepairRecords.unshift(newRecord);
+    saveMockDataToStorage();
     return newRecord;
   },
 
@@ -371,6 +412,7 @@ export const repairRecordService = {
     const index = mockRepairRecords.findIndex((r) => r.id === id);
     if (index === -1) return undefined;
     mockRepairRecords[index] = { ...mockRepairRecords[index], ...updates };
+    saveMockDataToStorage();
     return mockRepairRecords[index];
   },
 
@@ -430,6 +472,7 @@ export const inventoryService = {
       updatedAt: now,
     };
     mockInventory.push(newItem);
+    saveMockDataToStorage();
     return newItem;
   },
 
@@ -444,6 +487,7 @@ export const inventoryService = {
     updated.totalValue = updated.quantity * updated.unitPrice;
     updated.updatedAt = new Date().toISOString();
     mockInventory[index] = updated;
+    saveMockDataToStorage();
     return mockInventory[index];
   },
 
@@ -469,6 +513,7 @@ export const inventoryService = {
     const index = mockInventory.findIndex((i) => i.id === id);
     if (index === -1) return false;
     mockInventory.splice(index, 1);
+    saveMockDataToStorage();
     return true;
   },
 };
@@ -523,6 +568,7 @@ export const maintenancePlanService = {
       updatedAt: now,
     };
     mockMaintenancePlans.push(newPlan);
+    saveMockDataToStorage();
     return newPlan;
   },
 
@@ -538,6 +584,7 @@ export const maintenancePlanService = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
+    saveMockDataToStorage();
     return mockMaintenancePlans[index];
   },
 
@@ -638,6 +685,7 @@ export const calibrationRecordService = {
       createdAt: new Date().toISOString(),
     };
     mockCalibrationRecords.unshift(newRecord);
+    saveMockDataToStorage();
     return newRecord;
   },
 };
@@ -683,6 +731,7 @@ export const scrapApplicationService = {
       updatedAt: now,
     };
     mockScrapApplications.unshift(newApp);
+    saveMockDataToStorage();
     return newApp;
   },
 
@@ -698,6 +747,7 @@ export const scrapApplicationService = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
+    saveMockDataToStorage();
     return mockScrapApplications[index];
   },
 
@@ -774,6 +824,7 @@ export const messageService = {
       createdAt: new Date().toISOString(),
     };
     mockMessages.unshift(newMessage);
+    saveMockDataToStorage();
     return newMessage;
   },
 
@@ -786,6 +837,7 @@ export const messageService = {
       isRead: true,
       readAt: new Date().toISOString(),
     };
+    saveMockDataToStorage();
     return mockMessages[index];
   },
 
@@ -802,6 +854,7 @@ export const messageService = {
         count++;
       }
     });
+    if (count > 0) saveMockDataToStorage();
     return count;
   },
 };
@@ -860,6 +913,7 @@ export const inspectionPlanService = {
       updatedAt: now,
     };
     mockInspectionPlans.push(newPlan);
+    saveMockDataToStorage();
     return newPlan;
   },
 
@@ -875,6 +929,7 @@ export const inspectionPlanService = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
+    saveMockDataToStorage();
     return mockInspectionPlans[index];
   },
 

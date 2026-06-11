@@ -12,7 +12,7 @@ interface AuthState {
 }
 
 interface AuthActions {
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (username: string, password: string, expectedRole?: UserRole) => Promise<boolean>;
   logout: () => void;
   hasPermission: (permission: string | string[]) => boolean;
   isRole: (role: UserRole | UserRole[]) => boolean;
@@ -37,18 +37,21 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       error: null,
       users: [],
 
-      login: async (username: string, password: string) => {
+      login: async (username: string, password: string, expectedRole?: UserRole) => {
         set({ loading: true, error: null });
         try {
-          const user = await userService.login(username, password);
-          if (user) {
-            const token = btoa(`${user.id}:${Date.now()}`);
-            set({ user, token, loading: false });
-            return true;
-          } else {
+          const userWithoutRoleCheck = await userService.login(username, password);
+          if (!userWithoutRoleCheck) {
             set({ error: '用户名或密码错误', loading: false });
             return false;
           }
+          if (expectedRole && userWithoutRoleCheck.role !== expectedRole) {
+            set({ error: '用户名、密码或角色不匹配，请检查后重试', loading: false });
+            return false;
+          }
+          const token = btoa(`${userWithoutRoleCheck.id}:${Date.now()}`);
+          set({ user: userWithoutRoleCheck, token, loading: false });
+          return true;
         } catch (err) {
           set({ error: '登录失败，请稍后重试', loading: false });
           return false;

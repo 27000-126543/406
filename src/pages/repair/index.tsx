@@ -225,19 +225,22 @@ export default function RepairWorkbench() {
       const values = await repairForm.validateFields();
       if (!selectedWorkOrder) return;
 
-      const beforeImages = beforeImageList.map((f) => f.url || f.name);
-      const afterImages = afterImageList.map((f) => f.url || f.name);
+      const beforeImages = beforeImageList.map((f) => f.url || f.name || `before_${Date.now()}_${f.uid}`);
+      const afterImages = afterImageList.map((f) => f.url || f.name || `after_${Date.now()}_${f.uid}`);
 
-      const success = await completeWorkOrder(selectedWorkOrder.id, {
-        actualTime: Math.floor(repairTimer / 60),
+      const actualTime = Math.max(1, Math.floor(repairTimer / 60));
+
+      const repairRecord = await completeWorkOrder(selectedWorkOrder.id, {
+        actualTime,
         failureAnalysis: values.faultAnalysis,
         solution: values.solution,
         parts: selectedParts,
-        images: [...beforeImages, ...afterImages],
+        beforePhotos: beforeImages,
+        afterPhotos: afterImages,
       });
 
-      if (success) {
-        message.success('维修报告提交成功');
+      if (repairRecord) {
+        message.success('维修完成，维修单已生成');
         setReportModalVisible(false);
         setRepairModalVisible(false);
         setTimerRunning(false);
@@ -246,6 +249,9 @@ export default function RepairWorkbench() {
         setSelectedParts([]);
         setBeforeImageList([]);
         setAfterImageList([]);
+      } else {
+        const { error } = useWorkOrderStore.getState();
+        message.error(error || '提交失败，请重试');
       }
     } catch {
       message.error('请填写完整的维修报告');
